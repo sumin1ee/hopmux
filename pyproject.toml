@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hopmux"
+version = "0.1.0"
+description = "Hop across your SSH servers and pick up any Claude Code / Codex session where you left off — a cmux-style TUI over tmux."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "isumin" }]
+keywords = ["ssh", "tmux", "claude-code", "codex", "terminal", "tui", "multiplexer", "sessions"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "textual>=0.60",
+]
+
+[project.urls]
+Homepage = "https://github.com/isumin/hopmux"
+Issues = "https://github.com/isumin/hopmux/issues"
+
+[project.scripts]
+hopmux = "hopmux.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hopmux"]
+
+[tool.hatch.build.targets.sdist]
+include = ["hopmux", "README.md", "LICENSE", "docs"]

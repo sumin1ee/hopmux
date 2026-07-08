@@ -1,0 +1,96 @@
+/* hopmux — layout & look. Colors come from the registered theme (theme.py),
+   so this file mostly does structure, spacing and role-based tints. Both lists
+   are OptionList (synchronous rebuild); per-row color lives in Rich markup. */
+
+Screen {
+    layout: horizontal;
+    background: $background;
+}
+
+/* ---------------- left: servers ---------------- */
+#sidebar {
+    width: 30;
+    min-width: 22;
+    max-width: 48;
+    background: $surface;
+    border-right: solid $secondary 30%;
+    padding: 0;
+}
+
+#sidebar-title {
+    height: 1;
+    padding: 0 1;
+    color: $accent;
+    text-style: bold;
+    background: $panel;
+}
+
+#server-list {
+    background: $surface;
+    height: 1fr;
+    border: none;
+    padding: 0 0;
+    scrollbar-size-vertical: 1;
+}
+#server-list > .option-list--option {
+    padding: 0 1;
+}
+#server-list:focus > .option-list--option-highlighted {
+    background: $primary 35%;
+    text-style: bold;
+}
+#server-list > .option-list--option-highlighted {
+    background: $primary 20%;
+}
+
+/* ---------------- right: sessions / detail ---------------- */
+#main {
+    width: 1fr;
+    layout: vertical;
+    background: $background;
+}
+
+#main-title {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    color: $foreground;
+    text-style: bold;
+}
+
+#hint {
+    height: 1;
+    padding: 0 1;
+    color: $text-muted;
+    background: $background;
+}
+
+#session-list {
+    height: 1fr;
+    background: $background;
+    border: none;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+#session-list > .option-list--option {
+    padding: 0 0 1 0;   /* trailing blank line separates two-line rows */
+}
+#session-list:focus > .option-list--option-highlighted {
+    background: $accent 30%;
+}
+#session-list > .option-list--option-highlighted {
+    background: $accent 15%;
+}
+
+#filter {
+    display: none;
+    dock: bottom;
+    height: 3;
+    border: round $accent;
+    background: $surface;
+}
+#filter.visible { display: block; }
+
+Footer {
+    background: $panel;
+}
