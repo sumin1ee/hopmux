@@ -330,10 +330,13 @@ async function openTerminal(req: any, title: string, color: string) {
 // attention() — the agent wants input: bounce its mascot, and if the tab isn't
 // the active one, mark it and give a gentle system beep.
 function attention(tab: Tab) {
-  if (tab.mascot) {
-    tab.mascot.classList.remove('jump');
-    void tab.mascot.offsetWidth; // restart the CSS animation
-    tab.mascot.classList.add('jump');
+  const m = tab.mascot;
+  if (m) {
+    m.classList.remove('jump');
+    void m.offsetWidth; // restart the CSS animation
+    m.classList.add('jump');
+    // when the big hop finishes, drop the class so the idle bob resumes
+    m.addEventListener('animationend', () => m.classList.remove('jump'), { once: true });
   }
   if (tab.id !== activeTab) tab.tabEl.classList.add('attn');
 }

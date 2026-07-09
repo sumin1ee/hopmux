@@ -76,11 +76,22 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
 .tab:hover { background: var(--panel); }
 .tab.active { color: var(--fg); border-bottom-color: var(--codex); background: var(--bg); }
 .tab .tdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.tab .mascot { width: 18px; height: 18px; flex: none; display: block; }
+.tab .mascot { width: 18px; height: 18px; flex: none; display: block;
+  transform-origin: center bottom;
+  /* gentle continuous idle bob so the character always feels alive */
+  animation: mascot-bob 1.6s ease-in-out infinite; }
 .tab.attn { background: color-mix(in srgb, var(--claude) 18%, transparent); }
 .tab.attn .tname { color: var(--claude); font-weight: 700; }
-/* mascot jumps when the agent wants your attention */
+/* bigger, faster hop when the agent wants your attention */
 .mascot.jump { animation: mascot-jump 0.55s ease-out 3; }
+
+@keyframes mascot-bob {
+  0%, 100% { transform: translateY(0) scale(1); }
+  25%      { transform: translateY(-4px) scale(1.08); }
+  40%      { transform: translateY(0) scale(0.97); }
+  55%      { transform: translateY(-1.5px) scale(1.03); }
+  70%      { transform: translateY(0) scale(1); }
+}
 @keyframes mascot-jump {
   0%   { transform: translateY(0) scale(1); }
   30%  { transform: translateY(-6px) scale(1.12); }
