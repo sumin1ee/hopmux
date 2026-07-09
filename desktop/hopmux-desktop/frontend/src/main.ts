@@ -10,7 +10,7 @@ import {
   HostNames, Scan, OpenSession, SendInput, Resize, RescanHost, CloseSession,
   AddServer, GetSettings, SaveSettings, ReadSSHConfig, WriteSSHConfig,
 } from '../wailsjs/go/main/App';
-import { EventsOn } from '../wailsjs/runtime/runtime';
+import { EventsOn, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
 const MONO = "'HopmuxMono', SFMono-Regular, Menlo, monospace";
 
@@ -44,6 +44,9 @@ const $tabbar = document.getElementById('tabbar')!;
 const $connText = document.getElementById('conn-text')!;
 const $connDot = document.getElementById('conn-dot')!;
 (document.getElementById('logo') as HTMLImageElement).src = logoUrl;
+
+// Double-click the title bar to maximize / restore (standard macOS behavior).
+document.getElementById('titlebar')!.addEventListener('dblclick', () => WindowToggleMaximise());
 
 // ---------- tabs ----------
 interface Tab {
@@ -393,6 +396,10 @@ function toggleTheme() {
   for (const t of tabs) t.term.options.theme = xtermTheme(light);
 }
 document.addEventListener('keydown', (ev) => {
+  // Esc closes an open modal (Settings / Add server) before anything else.
+  if (ev.key === 'Escape' && !$overlay.classList.contains('hidden')) {
+    closeModal(); ev.preventDefault(); return;
+  }
   // Zoom (font size), like a terminal: Cmd/Ctrl +/- and 0 to reset.
   if (ev.metaKey || ev.ctrlKey) {
     switch (ev.code) {

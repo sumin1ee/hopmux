@@ -107,4 +107,8 @@ Early but usable. macOS desktop app is the primary target; Windows builds compil
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Bundled font [D2Coding](https://github.com/naver/d2codingfont) is under the SIL Open Font License.
+hopmux is released under the **MIT License** — see [LICENSE](LICENSE).
+
+It bundles the [D2Coding](https://github.com/naver/d2codingfont) font (© NAVER
+Corp., **SIL Open Font License 1.1**) and depends on Wails, xterm.js, Bubble Tea,
+and others. Full attributions are in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
