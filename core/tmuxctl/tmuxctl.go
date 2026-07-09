@@ -64,9 +64,10 @@ func ResumeCommand(a model.AgentSession) string {
 }
 
 // AttachExisting attaches to a pre-existing tmux session by name (a live tmux the
-// user already had — hopmux creates nothing here).
+// user already had — hopmux creates nothing here). Enables mouse so the wheel
+// scrolls the pane history.
 func AttachExisting(name string) string {
-	return "tmux attach -t " + q(name)
+	return "tmux set -g mouse on 2>/dev/null; tmux attach -t " + q(name)
 }
 
 // DirectResume runs an agent session directly (no tmux wrapper) — a fresh
@@ -92,8 +93,13 @@ func agentSessionName(a model.AgentSession) string {
 func AgentTmux(a model.AgentSession) string {
 	name := agentSessionName(a)
 	inner := ResumeCommand(a)
-	// new-session -A: attach if it exists, else create running the resume command.
-	return locale + "tmux new-session -A -s " + q(name) + " " + q(inner)
+	// Create/attach detached first so the server exists, turn on mouse mode (so
+	// trackpad/wheel scrolls the pane's history — otherwise a full-screen TUI
+	// swallows the scroll), then attach.
+	return locale +
+		"tmux new-session -A -d -s " + q(name) + " " + q(inner) + "; " +
+		"tmux set -g mouse on 2>/dev/null; " +
+		"tmux attach -t " + q(name)
 }
 
 // hasSession is a shell test for the managed session.
@@ -174,7 +180,7 @@ func NewSession(dir, agent string) string {
 	do := "tmux split-window -h -t " + q(Session) + " " + q(cmd)
 	create := "tmux new-session -d -s " + q(Session) + " " + q(cmd)
 	body := "if " + hasSession() + "; then " + do + "; else " + create + "; fi"
-	return body + "; tmux attach -t " + q(Session)
+	return body + "; tmux set -g mouse on 2>/dev/null; tmux attach -t " + q(Session)
 }
 
 // shellPath quotes a path for the remote shell but leaves a leading ~ unquoted so
@@ -197,7 +203,8 @@ func ClosePane() string {
 
 // AttachSession attaches to (creating if needed) the managed session.
 func AttachSession() string {
-	return "tmux new-session -A -s " + q(Session)
+	return "tmux new-session -A -d -s " + q(Session) + "; " +
+		"tmux set -g mouse on 2>/dev/null; tmux attach -t " + q(Session)
 }
 
 // PaneLimitReached is a client-side helper: past this many panes, splitting gets
