@@ -67,7 +67,7 @@ func ResumeCommand(a model.AgentSession) string {
 // user already had — hopmux creates nothing here). Enables mouse so the wheel
 // scrolls the pane history.
 func AttachExisting(name string) string {
-	return "tmux set -g mouse on 2>/dev/null; tmux attach -t " + q(name)
+	return "tmux set -g mouse on 2>/dev/null; tmux set -g history-limit 10000 2>/dev/null; tmux attach -t " + q(name)
 }
 
 // DirectResume runs an agent session directly (no tmux wrapper) — a fresh
@@ -98,7 +98,7 @@ func AgentTmux(a model.AgentSession) string {
 	// swallows the scroll), then attach.
 	return locale +
 		"tmux new-session -A -d -s " + q(name) + " " + q(inner) + "; " +
-		"tmux set -g mouse on 2>/dev/null; " +
+		"tmux set -g mouse on 2>/dev/null; tmux set -g history-limit 10000 2>/dev/null; " +
 		"tmux attach -t " + q(name)
 }
 
@@ -180,7 +180,7 @@ func NewSession(dir, agent string) string {
 	do := "tmux split-window -h -t " + q(Session) + " " + q(cmd)
 	create := "tmux new-session -d -s " + q(Session) + " " + q(cmd)
 	body := "if " + hasSession() + "; then " + do + "; else " + create + "; fi"
-	return body + "; tmux set -g mouse on 2>/dev/null; tmux attach -t " + q(Session)
+	return body + "; tmux set -g mouse on 2>/dev/null; tmux set -g history-limit 10000 2>/dev/null; tmux attach -t " + q(Session)
 }
 
 // shellPath quotes a path for the remote shell but leaves a leading ~ unquoted so
@@ -204,7 +204,7 @@ func ClosePane() string {
 // AttachSession attaches to (creating if needed) the managed session.
 func AttachSession() string {
 	return "tmux new-session -A -d -s " + q(Session) + "; " +
-		"tmux set -g mouse on 2>/dev/null; tmux attach -t " + q(Session)
+		"tmux set -g mouse on 2>/dev/null; tmux set -g history-limit 10000 2>/dev/null; tmux attach -t " + q(Session)
 }
 
 // PaneLimitReached is a client-side helper: past this many panes, splitting gets
