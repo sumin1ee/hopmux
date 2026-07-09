@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "hopmux",
+  "outputfilename": "hopmux",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "sumin1ee",
+    "email": "maroona@hanyang.ac.kr"
+  },
+  "info": {
+    "productName": "hopmux",
+    "comments": "Hop across your SSH servers and resume any Claude Code / Codex session."
+  }
+}

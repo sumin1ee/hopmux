@@ -1,14 +1,14 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-build/
-dist/
-*.egg
-.venv/
-venv/
-env/
+# Go
+/hopmux
+/dist/
+*.test
+*.out
+
+# Desktop app (Wails) build artifacts & deps
+desktop/hopmux-desktop/build/bin/
+desktop/hopmux-desktop/frontend/node_modules/
+desktop/hopmux-desktop/frontend/dist/
+desktop/hopmux-desktop/frontend/wailsjs/
 
 # OS / editor
 .DS_Store
@@ -16,6 +16,10 @@ env/
 .idea/
 .vscode/
 
-# Test / snapshot scratch
-.pytest_cache/
-docs/images/*.svg.png
+# hopmux runtime
+/tmp/hopmux-*
+
+# stray binaries
+desktop/hopmux-desktop/hopmux-desktop
+desktop/hopmux-desktop/build/hopmux-tui
+desktop/hopmux-desktop/frontend/package.json.md5

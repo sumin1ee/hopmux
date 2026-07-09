@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>hopmux</title>
+</head>
+<body>
+<div id="app">
+    <!-- full-width title bar strip; traffic lights live here on the left -->
+    <div id="titlebar"><span id="titlebar-text">hopmux</span></div>
+
+    <div id="body">
+        <aside id="sidebar">
+            <div id="brand"><img id="logo" alt="hopmux"/></div>
+            <div class="section-label">SERVERS</div>
+            <div id="server-list"></div>
+            <div id="sidebar-footer">
+                <div class="foot-btn" id="add-server">＋ Add server</div>
+                <div class="foot-btn" id="open-settings">⚙ Settings</div>
+            </div>
+            <div id="conn-status"><span id="conn-text">Scanning…</span><span id="conn-dot">●</span></div>
+        </aside>
+
+        <div id="divider"></div>
+
+        <main id="main">
+            <div id="tabbar"></div>
+            <div id="content">
+                <!-- session picker (browse a server's sessions) -->
+                <div id="picker">
+                    <div id="picker-head"></div>
+                    <div id="session-list"></div>
+                </div>
+                <!-- terminals: one wrapper per tab, only the active one visible -->
+                <div id="terminals"></div>
+            </div>
+        </main>
+    </div>
+    <!-- modal overlay -->
+    <div id="modal-overlay" class="hidden">
+        <div id="modal">
+            <div id="modal-head"><span id="modal-title"></span><span id="modal-close">✕</span></div>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+</div>
+<script src="./src/main.ts" type="module"></script>
+</body>
+</html>
