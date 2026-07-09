@@ -42,27 +42,22 @@ Getting back to any single one means: remember which server → `ssh` in → hun
 
 ## Install
 
-### Desktop app (macOS)
+### Download
 
-Requires [Go](https://go.dev), [Node](https://nodejs.org), and the [Wails CLI](https://wails.io).
+**→ [Latest release](https://github.com/sumin1ee/hopmux/releases/latest)** — download and run, no build step.
 
-```bash
-git clone https://github.com/sumin1ee/hopmux
-cd hopmux
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-./desktop/build-mac.sh          # → desktop/hopmux-desktop/build/bin/hopmux.app
-open desktop/hopmux-desktop/build/bin/hopmux.app
-```
+- **macOS** — download `hopmux.dmg`, open it, and drag **hopmux** to Applications.
+  The app is unsigned, so on first launch **right-click it → Open** (or run
+  `xattr -dr com.apple.quarantine /Applications/hopmux.app`).
+- **Windows** — download `hopmux.exe` and run it. *(Windows build is not yet
+  tested on real hardware — please report issues.)*
 
-### CLI / TUI
+That's it — launch hopmux and it reads your `~/.ssh/config`.
 
-```bash
-go install github.com/sumin1ee/hopmux@latest
-hopmux            # the terminal dashboard
-hopmux --demo     # try it with built-in mock data (no servers needed)
-```
+### Requirements (on the remote hosts)
 
-**On the remote hosts** you want full functionality, you need `python3` (for session discovery) and `tmux`. `claude` / `codex` must be installed there for resume to launch.
+For full functionality each host needs `python3` (for session discovery) and
+`tmux`. `claude` / `codex` must be installed there for resume to launch.
 
 ## Usage
 
