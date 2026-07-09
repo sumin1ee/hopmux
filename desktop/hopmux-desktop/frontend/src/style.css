@@ -36,6 +36,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
 /* ---------------- sidebar ---------------- */
 #sidebar { width: 240px; min-width: 180px; background: var(--surface);
   display: flex; flex-direction: column; user-select: none; }
+#sidebar.collapsed { display: none; }
 #brand { padding: 14px 16px 6px; }
 #logo { width: 46px; height: 46px; border-radius: 11px; display: block; }
 .section-label { padding: 8px 16px 6px; color: var(--muted); font-size: 11px;
