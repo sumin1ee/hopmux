@@ -1,6 +1,8 @@
 import '@xterm/xterm/css/xterm.css';
 import './style.css';
 import logoUrl from './assets/logo.png';
+import claudeMascot from './assets/claude-mascot.svg';
+import codexMascot from './assets/codex-mascot.svg';
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -56,11 +58,14 @@ document.getElementById('titlebar')!.addEventListener('dblclick', () => WindowTo
 
 // ---------- tabs ----------
 interface Tab {
-  id: string; title: string; color: string;
+  id: string; title: string; color: string; kind: string;
   term: Terminal; fit: FitAddon; wrap: HTMLElement; tabEl: HTMLElement;
+  mascot?: HTMLElement;
 }
 const tabs: Tab[] = [];
 let activeTab: string | null = null;
+
+const mascotFor: Record<string, string> = { claude: claudeMascot, codex: codexMascot };
 
 function xtermTheme(light: boolean) {
   return light
@@ -70,7 +75,7 @@ function xtermTheme(light: boolean) {
         magenta: '#d97757', cyan: '#2bb6c4', white: '#e6e6e6', brightBlack: '#3b4351' };
 }
 
-function newTab(id: string, title: string, color: string): Tab {
+function newTab(id: string, title: string, color: string, kind: string): Tab {
   const term = new Terminal({
     fontFamily: MONO, fontSize, lineHeight: 1.1, cursorBlink: true,
     allowProposedApi: true, scrollback: 1000,
@@ -86,8 +91,10 @@ function newTab(id: string, title: string, color: string): Tab {
 
   const tabEl = document.createElement('div');
   tabEl.className = 'tab';
+  // dot · (mascot for claude/codex) · name · ✕
+  const mascotHTML = mascotFor[kind] ? `<img class="mascot" src="${mascotFor[kind]}" alt=""/>` : '';
   tabEl.innerHTML = `<span class="tdot" style="background:${color}"></span>` +
-    `<span class="tname"></span><span class="tclose">✕</span>`;
+    mascotHTML + `<span class="tname"></span><span class="tclose">✕</span>`;
   (tabEl.querySelector('.tname') as HTMLElement).textContent = title;
   tabEl.onclick = (e) => {
     if ((e.target as HTMLElement).classList.contains('tclose')) { closeTab(id); return; }
@@ -96,8 +103,17 @@ function newTab(id: string, title: string, color: string): Tab {
   $tabbar.append(tabEl);
   keepNewBtnLast();
 
-  const tab: Tab = { id, title, color, term, fit, wrap, tabEl };
+  const tab: Tab = { id, title, color, kind, term, fit, wrap, tabEl,
+    mascot: tabEl.querySelector('.mascot') as HTMLElement || undefined };
   tabs.push(tab);
+
+  // Attention: the agent rings the bell (or emits an OSC 9 / OSC 777 desktop
+  // notification) when it wants you — bounce the mascot and flag the tab.
+  term.onBell(() => attention(tab));
+  try {
+    term.parser.registerOscHandler(9, () => { attention(tab); return false; });
+    term.parser.registerOscHandler(777, () => { attention(tab); return false; });
+  } catch {}
 
   term.onData((d) => SendInput(id, d));
   EventsOn('pty:data:' + id, (d: string) => term.write(d));
@@ -125,7 +141,7 @@ function activateTab(id: string) {
     const on = t.id === id;
     t.wrap.classList.toggle('hidden', !on);
     t.tabEl.classList.toggle('active', on);
-    if (on) { setTimeout(() => { fitTab(t); t.term.focus(); }, 0); }
+    if (on) { t.tabEl.classList.remove('attn'); setTimeout(() => { fitTab(t); t.term.focus(); }, 0); }
   }
   paintSidebar();
 }
@@ -290,9 +306,22 @@ function agentRow(a: Agent, showHost: boolean): HTMLElement {
 // ---------- open a session as a new tab ----------
 async function openTerminal(req: any, title: string, color: string) {
   const id = await OpenSession(req);
-  const tab = newTab(id, `${req.host} · ${title}`, color);
+  // mascot kind = the agent (claude/codex) for agent sessions, else none
+  const kind = req.kind === 'agent' ? req.agent : '';
+  const tab = newTab(id, `${req.host} · ${title}`, color, kind);
   activateTab(tab.id);
   if (req.kind === 'login') startLoginPoll(req.host);
+}
+
+// attention() — the agent wants input: bounce its mascot, and if the tab isn't
+// the active one, mark it and give a gentle system beep.
+function attention(tab: Tab) {
+  if (tab.mascot) {
+    tab.mascot.classList.remove('jump');
+    void tab.mascot.offsetWidth; // restart the CSS animation
+    tab.mascot.classList.add('jump');
+  }
+  if (tab.id !== activeTab) tab.tabEl.classList.add('attn');
 }
 
 let loginPoll: number | undefined;

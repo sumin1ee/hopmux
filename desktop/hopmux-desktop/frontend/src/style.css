@@ -76,6 +76,18 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
 .tab:hover { background: var(--panel); }
 .tab.active { color: var(--fg); border-bottom-color: var(--codex); background: var(--bg); }
 .tab .tdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.tab .mascot { width: 18px; height: 18px; flex: none; display: block; }
+.tab.attn { background: color-mix(in srgb, var(--claude) 18%, transparent); }
+.tab.attn .tname { color: var(--claude); font-weight: 700; }
+/* mascot jumps when the agent wants your attention */
+.mascot.jump { animation: mascot-jump 0.55s ease-out 3; }
+@keyframes mascot-jump {
+  0%   { transform: translateY(0) scale(1); }
+  30%  { transform: translateY(-6px) scale(1.12); }
+  50%  { transform: translateY(0) scale(0.96); }
+  65%  { transform: translateY(-3px) scale(1.05); }
+  100% { transform: translateY(0) scale(1); }
+}
 .tab .tclose { color: var(--muted); border-radius: 4px; padding: 0 3px; }
 .tab .tclose:hover { background: var(--border); color: var(--fg); }
 .tab-new { display: flex; align-items: center; padding: 0 14px; cursor: pointer;
