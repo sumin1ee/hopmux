@@ -14,6 +14,12 @@ import { EventsOn, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
 const MONO = "'HopmuxMono', SFMono-Regular, Menlo, monospace";
 
+// Surface any runtime error in the title bar so failures aren't silent.
+window.addEventListener('error', (e) => {
+  const t = document.getElementById('titlebar-text');
+  if (t) { t.textContent = '⚠ ' + (e.message || 'error'); t.style.color = '#f85149'; }
+});
+
 // ---------- types ----------
 interface Agent { Agent: string; SID: string; CWD: string; MTime: number; Title: string; Host: string; }
 interface Tmux { Name: string; Windows: string; Attached: boolean; Host: string; }
@@ -383,9 +389,11 @@ function applySettings(s: { theme: string; autoRefreshSec: number; fontSize: num
   refreshMs = (s.autoRefreshSec || 0) * 1000;
 }
 
-// new-tab "+" button, kept last in the tab bar
+// new-tab "+" button — always present in the tab bar, kept last
 const newTabBtn = el('div', 'tab-new', '＋');
+newTabBtn.title = 'new session';
 newTabBtn.onclick = () => showPicker();
+$tabbar.append(newTabBtn);
 function keepNewBtnLast() { $tabbar.append(newTabBtn); } // append moves it to the end
 
 // ---------- keyboard ----------
@@ -395,30 +403,34 @@ function toggleTheme() {
   const light = document.documentElement.classList.toggle('light');
   for (const t of tabs) t.term.options.theme = xtermTheme(light);
 }
+// Registered in the CAPTURE phase so it runs BEFORE xterm.js (which is focused
+// during a session and would otherwise swallow these) and before WebKit's own
+// ⌘+/- page zoom. `eat()` fully consumes an event for our shortcuts.
 document.addEventListener('keydown', (ev) => {
+  const eat = () => { ev.preventDefault(); ev.stopPropagation(); (ev as any).stopImmediatePropagation?.(); };
+
   // Esc closes an open modal (Settings / Add server) before anything else.
-  if (ev.key === 'Escape' && !$overlay.classList.contains('hidden')) {
-    closeModal(); ev.preventDefault(); return;
-  }
-  // Zoom (font size), like a terminal: Cmd/Ctrl +/- and 0 to reset.
+  if (ev.key === 'Escape' && !$overlay.classList.contains('hidden')) { closeModal(); eat(); return; }
+
+  // Zoom (font size): Cmd/Ctrl +/- and 0 to reset. (Beats WebKit page zoom.)
   if (ev.metaKey || ev.ctrlKey) {
     switch (ev.code) {
-      case 'Equal': case 'NumpadAdd': setFontSize(fontSize + 1); ev.preventDefault(); return;
-      case 'Minus': case 'NumpadSubtract': setFontSize(fontSize - 1); ev.preventDefault(); return;
-      case 'Digit0': case 'Numpad0': setFontSize(13); ev.preventDefault(); return;
+      case 'Equal': case 'NumpadAdd': setFontSize(fontSize + 1); eat(); return;
+      case 'Minus': case 'NumpadSubtract': setFontSize(fontSize - 1); eat(); return;
+      case 'Digit0': case 'Numpad0': setFontSize(13); eat(); return;
     }
   }
   const mod = ev.metaKey || ev.altKey;
   if (mod && !ev.ctrlKey) {
     switch (ev.code) {
-      case 'KeyB': toggleSidebar(); ev.preventDefault(); return;
-      case 'KeyG': showGPU = !showGPU; paintSidebar(); renderPicker(); ev.preventDefault(); return;
-      case 'KeyR': Scan(); ev.preventDefault(); return;
-      case 'KeyD': toggleTheme(); ev.preventDefault(); return;
-      case 'KeyW': if (activeTab) closeTab(activeTab); ev.preventDefault(); return;
+      case 'KeyB': toggleSidebar(); eat(); return;
+      case 'KeyG': showGPU = !showGPU; paintSidebar(); renderPicker(); eat(); return;
+      case 'KeyR': Scan(); eat(); return;
+      case 'KeyD': toggleTheme(); eat(); return;
+      case 'KeyW': if (activeTab) closeTab(activeTab); eat(); return;
     }
   }
-  if (terminalActive()) return; // keys go to the xterm
+  if (terminalActive()) return; // navigation keys go to the xterm
   // picker navigation
   const rows = Array.from($sessionList.querySelectorAll('.sess')) as HTMLElement[];
   if (!rows.length) return;
@@ -426,7 +438,7 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key === 'ArrowDown' || ev.key === 'j') { i = Math.min(i + 1, rows.length - 1); if (i < 0) i = 0; rows.forEach((r, k) => r.classList.toggle('kbsel', k === i)); rows[i].scrollIntoView({ block: 'nearest' }); ev.preventDefault(); }
   else if (ev.key === 'ArrowUp' || ev.key === 'k') { i = i <= 0 ? 0 : i - 1; rows.forEach((r, k) => r.classList.toggle('kbsel', k === i)); rows[i].scrollIntoView({ block: 'nearest' }); ev.preventDefault(); }
   else if (ev.key === 'Enter' && i >= 0) { rows[i].click(); ev.preventDefault(); }
-});
+}, true); // capture phase
 
 // ---------- auto-refresh (safe: only already-reachable hosts) ----------
 let refreshMs = 20000;

@@ -66,7 +66,9 @@ hopmux --demo     # try it with built-in mock data (no servers needed)
 
 ## Usage
 
-Pick a server on the left → its sessions appear → click one to open it as a tab.
+**→ Full guide: [docs/USAGE.md](docs/USAGE.md)** (browsing, tabs, tmux splits, GPU view, login, settings).
+
+Quick version: pick a server on the left → its sessions appear → click one to open it as a tab.
 
 | | |
 |---|---|
