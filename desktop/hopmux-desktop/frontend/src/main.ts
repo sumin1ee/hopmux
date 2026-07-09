@@ -61,7 +61,10 @@ interface Tab {
   id: string; title: string; color: string; kind: string;
   term: Terminal; fit: FitAddon; wrap: HTMLElement; tabEl: HTMLElement;
   mascot?: HTMLElement;
+  idleTimer?: number; sawOutput?: boolean;
 }
+// How long output must be quiet before we treat a session as "waiting for you".
+const IDLE_MS = 2200;
 const tabs: Tab[] = [];
 let activeTab: string | null = null;
 
@@ -116,7 +119,17 @@ function newTab(id: string, title: string, color: string, kind: string): Tab {
   } catch {}
 
   term.onData((d) => SendInput(id, d));
-  EventsOn('pty:data:' + id, (d: string) => term.write(d));
+  EventsOn('pty:data:' + id, (d: string) => {
+    term.write(d);
+    // Idle-based "waiting for you": the agent streams output while working, then
+    // goes quiet when it wants input. If output settles and this tab isn't the
+    // one you're looking at, get the mascot's attention. (No agent config needed.)
+    tab.sawOutput = true;
+    clearTimeout(tab.idleTimer);
+    tab.idleTimer = window.setTimeout(() => {
+      if (tab.sawOutput && tab.id !== activeTab) attention(tab);
+    }, IDLE_MS);
+  });
   EventsOn('pty:exit:' + id, () => {
     term.write('\r\n\x1b[90m[session ended — ⌘W or click ✕ to close the tab]\x1b[0m\r\n');
   });
@@ -141,7 +154,7 @@ function activateTab(id: string) {
     const on = t.id === id;
     t.wrap.classList.toggle('hidden', !on);
     t.tabEl.classList.toggle('active', on);
-    if (on) { t.tabEl.classList.remove('attn'); setTimeout(() => { fitTab(t); t.term.focus(); }, 0); }
+    if (on) { t.tabEl.classList.remove('attn'); t.sawOutput = false; setTimeout(() => { fitTab(t); t.term.focus(); }, 0); }
   }
   paintSidebar();
 }
@@ -150,6 +163,7 @@ function closeTab(id: string) {
   const i = tabs.findIndex((t) => t.id === id);
   if (i < 0) return;
   const t = tabs[i];
+  clearTimeout(t.idleTimer);
   CloseSession(id);
   t.term.dispose(); t.wrap.remove(); t.tabEl.remove();
   tabs.splice(i, 1);
