@@ -396,6 +396,100 @@ newTabBtn.onclick = () => showPicker();
 $tabbar.append(newTabBtn);
 function keepNewBtnLast() { $tabbar.append(newTabBtn); } // append moves it to the end
 
+// ---------- ⌘K command palette (fuzzy search across all sessions) ----------
+const $paletteOverlay = document.getElementById('palette-overlay')!;
+const $paletteInput = document.getElementById('palette-input') as HTMLInputElement;
+const $paletteResults = document.getElementById('palette-results')!;
+
+interface SearchItem {
+  kind: 'tmux' | 'claude' | 'codex'; host: string; title: string; sub: string;
+  hay: string; open: () => void;
+}
+function buildSearchIndex(): SearchItem[] {
+  const items: SearchItem[] = [];
+  for (const name of order) {
+    const h = hosts.get(name);
+    if (!h?.Reachable) continue;
+    for (const t of (h.Tmux || [])) items.push({
+      kind: 'tmux', host: name, title: t.Name, sub: `${t.Windows}w · ${t.Attached ? 'attached' : 'detached'}`,
+      hay: `${name} tmux ${t.Name}`.toLowerCase(),
+      open: () => openTerminal({ host: name, kind: 'tmux', name: t.Name, agent: '', sid: '', cwd: '' }, t.Name, 'var(--tmux)'),
+    });
+    for (const a of (h.Agents || [])) items.push({
+      kind: a.Agent as any, host: name, title: a.Title || project(a.CWD), sub: a.CWD,
+      hay: `${name} ${a.Agent} ${a.Title} ${a.CWD}`.toLowerCase(),
+      open: () => openTerminal({ host: name, kind: 'agent', name: '', agent: a.Agent, sid: a.SID, cwd: a.CWD },
+        project(a.CWD), a.Agent === 'claude' ? 'var(--claude)' : 'var(--codex)'),
+    });
+  }
+  return items;
+}
+// subsequence fuzzy match with a light score (contiguous + word-start bonus)
+function fuzzy(hay: string, q: string): number {
+  if (!q) return 1;
+  let qi = 0, score = 0, prev = -2;
+  for (let i = 0; i < hay.length && qi < q.length; i++) {
+    if (hay[i] === q[qi]) {
+      score += (i === prev + 1) ? 3 : 1;
+      if (i === 0 || hay[i - 1] === ' ' || hay[i - 1] === '/') score += 2;
+      prev = i; qi++;
+    }
+  }
+  return qi === q.length ? score : 0;
+}
+let paletteItems: SearchItem[] = [];
+let paletteFiltered: SearchItem[] = [];
+let paletteSel = 0;
+
+function openPalette() {
+  paletteItems = buildSearchIndex();
+  $paletteInput.value = '';
+  $paletteOverlay.classList.remove('hidden');
+  renderPalette('');
+  $paletteInput.focus();
+}
+function closePalette() { $paletteOverlay.classList.add('hidden'); }
+function renderPalette(q: string) {
+  const query = q.trim().toLowerCase();
+  paletteFiltered = paletteItems
+    .map((it) => ({ it, s: fuzzy(it.hay, query) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 50)
+    .map((x) => x.it);
+  paletteSel = 0;
+  $paletteResults.innerHTML = '';
+  if (!paletteFiltered.length) {
+    $paletteResults.append(el('div', 'palette-empty', query ? 'no matches' : 'start typing to search…'));
+    return;
+  }
+  paletteFiltered.forEach((it, i) => {
+    const r = el('div', 'presult' + (i === 0 ? ' sel' : ''));
+    const tag = el('span', 'ptag ' + it.kind, it.kind === 'tmux' ? '▣' : '◉');
+    const mid = el('div'); mid.style.minWidth = '0'; mid.style.flex = '1';
+    mid.append(el('div', 'ptitle', it.title));
+    if (it.sub) mid.append(el('div', 'psub', it.sub));
+    r.append(tag, mid, el('span', 'phost', it.host));
+    r.onclick = () => { closePalette(); it.open(); };
+    $paletteResults.append(r);
+  });
+}
+function paletteMove(d: number) {
+  const rows = Array.from($paletteResults.querySelectorAll('.presult')) as HTMLElement[];
+  if (!rows.length) return;
+  paletteSel = (paletteSel + d + rows.length) % rows.length;
+  rows.forEach((r, i) => r.classList.toggle('sel', i === paletteSel));
+  rows[paletteSel].scrollIntoView({ block: 'nearest' });
+}
+$paletteInput.addEventListener('input', () => renderPalette($paletteInput.value));
+$paletteInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { paletteMove(1); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { paletteMove(-1); e.preventDefault(); }
+  else if (e.key === 'Enter') { const it = paletteFiltered[paletteSel]; if (it) { closePalette(); it.open(); } e.preventDefault(); }
+  else if (e.key === 'Escape') { closePalette(); e.preventDefault(); }
+});
+$paletteOverlay.addEventListener('click', (e) => { if (e.target === $paletteOverlay) closePalette(); });
+
 // ---------- keyboard ----------
 function terminalActive(): boolean { return activeTab !== null; }
 function toggleSidebar() { document.getElementById('sidebar')!.classList.toggle('collapsed'); }
@@ -409,6 +503,11 @@ function toggleTheme() {
 document.addEventListener('keydown', (ev) => {
   const eat = () => { ev.preventDefault(); ev.stopPropagation(); (ev as any).stopImmediatePropagation?.(); };
 
+  // While the ⌘K palette is open, let its own input handler own the keys (except
+  // the ⌘K toggle itself, handled below).
+  if (!$paletteOverlay.classList.contains('hidden') && !((ev.metaKey || ev.ctrlKey) && ev.code === 'KeyK')) {
+    return;
+  }
   // Esc closes an open modal (Settings / Add server) before anything else.
   if (ev.key === 'Escape' && !$overlay.classList.contains('hidden')) { closeModal(); eat(); return; }
 
@@ -419,6 +518,11 @@ document.addEventListener('keydown', (ev) => {
       case 'Minus': case 'NumpadSubtract': setFontSize(fontSize - 1); eat(); return;
       case 'Digit0': case 'Numpad0': setFontSize(13); eat(); return;
     }
+  }
+  // ⌘K / Ctrl-K — global session search
+  if ((ev.metaKey || ev.ctrlKey) && ev.code === 'KeyK') {
+    if ($paletteOverlay.classList.contains('hidden')) openPalette(); else closePalette();
+    eat(); return;
   }
   const mod = ev.metaKey || ev.altKey;
   if (mod && !ev.ctrlKey) {
