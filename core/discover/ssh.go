@@ -156,6 +156,9 @@ func (s *SSHBackend) probeOne(alias string) model.Host {
 	ctx, cancel := context.WithTimeout(context.Background(), s.Timeout+25*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ssh", args...)
+	// On Windows this ssh probe would flash its own console window on every scan
+	// (and scans repeat on a timer). Suppress it; no-op on other platforms.
+	hideWindow(cmd)
 	cmd.Stdin = strings.NewReader(probe.RemoteSH)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out

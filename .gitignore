@@ -21,5 +21,6 @@ desktop/hopmux-desktop/frontend/wailsjs/
 
 # stray binaries
 desktop/hopmux-desktop/hopmux-desktop
+desktop/hopmux-desktop/hopmux-desktop.exe
 desktop/hopmux-desktop/build/hopmux-tui
 desktop/hopmux-desktop/frontend/package.json.md5

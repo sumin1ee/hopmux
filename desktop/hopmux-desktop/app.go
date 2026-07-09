@@ -3,11 +3,10 @@ package main
 import (
 	"context"
 	"os"
-	"os/exec"
 	"sync"
 	"time"
 
-	"github.com/creack/pty"
+	pty "github.com/aymanbagabas/go-pty"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/isumin/hopmux/core/discover"
@@ -35,8 +34,18 @@ type App struct {
 // ptySession is one open terminal tab.
 type ptySession struct {
 	id   string
-	ptmx *os.File
-	cmd  *exec.Cmd
+	ptmx pty.Pty
+	cmd  *pty.Cmd
+
+	// The frontend subscribes to "pty:data:<id>" only AFTER OpenSession returns
+	// the id, but the PTY starts producing output immediately (Windows ssh.exe
+	// dumps its whole initial screen at once). Buffer everything until the
+	// frontend calls AttachTab(id); then flush and stream live. Without this the
+	// entire first screen is emitted before anyone is listening — a blank
+	// terminal on Windows.
+	bufMu    sync.Mutex
+	attached bool
+	backlog  []byte
 }
 
 func NewApp() *App { return &App{sessions: map[string]*ptySession{}} }
@@ -59,6 +68,11 @@ func (a *App) domReady(ctx context.Context) {
 // HostNames returns the config-ordered aliases (so the sidebar can render
 // placeholders immediately, before any scan completes).
 func (a *App) HostNames() []string { return a.hostList }
+
+// Platform returns the host OS ("windows", "darwin", "linux") so the frontend
+// can tell xterm.js it's driving a Windows ConPTY — without that hint xterm
+// mis-parses ssh.exe's ConPTY control sequences and renders a blank screen.
+func (a *App) Platform() string { return runtime.Environment(a.ctx).Platform }
 
 // Scan probes every host over SSH, emitting a "host:update" event per host as it
 // finishes and a "scan:done" event at the end.
@@ -99,7 +113,8 @@ func (a *App) OpenSession(req OpenReq) string {
 	default:
 		remote = tmuxctl.AttachSession()
 	}
-	return a.spawn("ssh", discover.RunArgs(req.Host, remote))
+	args := discover.RunArgs(req.Host, remote)
+	return a.spawn("ssh", args)
 }
 
 // RescanHost re-probes a single host and emits a "host:update". Used after an
@@ -118,21 +133,32 @@ func (a *App) RescanHost(host string) model.Host {
 // ---- terminal / PTY (one per tab) ----
 
 func (a *App) spawn(name string, args []string) string {
-	cmd := exec.Command(name, args...)
+	a.mu.Lock()
+	a.seq++
+	id := "t" + itoa(a.seq)
+	a.mu.Unlock()
+
+	// go-pty: create the pseudo-terminal first, then build the command bound to
+	// it. On Unix this is a real PTY (creack under the hood); on Windows it's a
+	// ConPTY — so terminals actually work on Windows, unlike raw creack/pty.
+	ptmx, err := pty.New()
+	if err != nil {
+		runtime.EventsEmit(a.ctx, "pty:data:"+id, "\r\n  failed: "+err.Error()+"\r\n")
+		return id
+	}
+	cmd := ptmx.Command(name, args...)
 	// A GUI app launched via Finder/LaunchServices does NOT inherit the shell's
 	// LANG/LC_* — force a UTF-8 locale so the remote emits real UTF-8 (else CJK
 	// renders as underscores).
 	cmd.Env = append(os.Environ(),
 		"TERM=xterm-256color", "COLORTERM=truecolor",
 		"LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8", "LC_CTYPE=en_US.UTF-8")
-	ptmx, err := pty.Start(cmd)
+	// On Windows, a console-subsystem child (ssh.exe) spawned from this GUI app
+	// would pop its own black console window. Suppress it (no-op elsewhere).
+	hideConsole(cmd)
 
-	a.mu.Lock()
-	a.seq++
-	id := "t" + itoa(a.seq)
-	a.mu.Unlock()
-
-	if err != nil {
+	if err := cmd.Start(); err != nil {
+		ptmx.Close()
 		runtime.EventsEmit(a.ctx, "pty:data:"+id, "\r\n  failed: "+err.Error()+"\r\n")
 		return id
 	}
@@ -152,12 +178,12 @@ func (a *App) spawn(name string, args []string) string {
 				good := completeUTF8Len(chunk) // don't cut a UTF-8 rune across events
 				carry = append(carry[:0:0], chunk[good:]...)
 				if good > 0 {
-					runtime.EventsEmit(a.ctx, "pty:data:"+id, string(chunk[:good]))
+					s.emitOrBuffer(a, chunk[:good])
 				}
 			}
 			if rerr != nil {
 				if len(carry) > 0 {
-					runtime.EventsEmit(a.ctx, "pty:data:"+id, string(carry))
+					s.emitOrBuffer(a, carry)
 				}
 				a.mu.Lock()
 				delete(a.sessions, id)
@@ -168,6 +194,38 @@ func (a *App) spawn(name string, args []string) string {
 		}
 	}()
 	return id
+}
+
+// emitOrBuffer sends data to the frontend if it has attached to this tab, else
+// stashes it in the backlog to be flushed the moment AttachTab is called.
+func (s *ptySession) emitOrBuffer(a *App, data []byte) {
+	s.bufMu.Lock()
+	if !s.attached {
+		s.backlog = append(s.backlog, data...)
+		s.bufMu.Unlock()
+		return
+	}
+	s.bufMu.Unlock()
+	runtime.EventsEmit(a.ctx, "pty:data:"+s.id, string(data))
+}
+
+// AttachTab is called by the frontend once it has subscribed to this tab's
+// "pty:data:<id>" event. It flushes any output buffered before the subscription
+// existed, then switches the session to live streaming. This closes the race
+// where the PTY's initial burst is emitted before anyone is listening.
+func (a *App) AttachTab(id string) {
+	s := a.get(id)
+	if s == nil {
+		return
+	}
+	s.bufMu.Lock()
+	backlog := s.backlog
+	s.backlog = nil
+	s.attached = true
+	s.bufMu.Unlock()
+	if len(backlog) > 0 {
+		runtime.EventsEmit(a.ctx, "pty:data:"+id, string(backlog))
+	}
 }
 
 func itoa(n int) string {
@@ -251,6 +309,6 @@ func (a *App) SendInput(id string, data string) {
 // Resize matches a tab's PTY to its xterm grid.
 func (a *App) Resize(id string, cols int, rows int) {
 	if s := a.get(id); s != nil && s.ptmx != nil && cols > 0 && rows > 0 {
-		pty.Setsize(s.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+		s.ptmx.Resize(cols, rows)
 	}
 }

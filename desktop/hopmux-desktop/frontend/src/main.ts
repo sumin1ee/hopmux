@@ -10,7 +10,8 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 
 import {
   HostNames, Scan, OpenSession, SendInput, Resize, RescanHost, CloseSession,
-  AddServer, GetSettings, SaveSettings, ReadSSHConfig, WriteSSHConfig,
+  AddServer, GetSettings, SaveSettings, ReadSSHConfig, WriteSSHConfig, Platform,
+  AttachTab,
 } from '../wailsjs/go/main/App';
 import { EventsOn, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
@@ -36,6 +37,10 @@ let order: string[] = [];
 let selected: string | null = null;
 let showGPU = false;
 let fontSize = 13;
+// Set from the Go backend at boot. On Windows the terminal is driven by a
+// ConPTY (ssh.exe under go-pty); xterm.js needs to be told so, or it mis-parses
+// the ConPTY control stream and paints a blank screen.
+let isWindows = false;
 
 function setFontSize(px: number) {
   fontSize = Math.max(8, Math.min(28, px));
@@ -83,6 +88,9 @@ function newTab(id: string, title: string, color: string, kind: string): Tab {
     fontFamily: MONO, fontSize, lineHeight: 1.1, cursorBlink: true,
     allowProposedApi: true, scrollback: 1000,
     theme: xtermTheme(document.documentElement.classList.contains('light')),
+    // Tell xterm the remote I/O comes through a Windows ConPTY so it parses the
+    // control stream correctly (otherwise: blank screen on Windows).
+    ...(isWindows ? { windowsPty: { backend: 'conpty' as const } } : {}),
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -133,10 +141,19 @@ function newTab(id: string, title: string, color: string, kind: string): Tab {
   EventsOn('pty:exit:' + id, () => {
     term.write('\r\n\x1b[90m[session ended — ⌘W or click ✕ to close the tab]\x1b[0m\r\n');
   });
+  // Now that both handlers are wired, tell the backend to flush any output it
+  // buffered before this subscription existed and start live streaming. Without
+  // this the PTY's initial burst (all of it, on Windows) is emitted to nobody.
+  AttachTab(id);
 
+  // Open the terminal in the DOM immediately — do NOT gate this on font loading.
+  // On Windows (WebView2) waiting for document.fonts.ready could stall term.open,
+  // leaving a permanently blank terminal. Open now, then refit once the custom
+  // font settles so glyph metrics are correct.
+  term.open(wrap);
+  fitTab(tab);
   (async () => {
     try { await (document as any).fonts.load('13px HopmuxMono'); await (document as any).fonts.ready; } catch {}
-    term.open(wrap);
     fitTab(tab);
   })();
   return tab;
@@ -609,6 +626,7 @@ EventsOn('host:update', (h: Host) => {
 EventsOn('scan:done', () => { paintSidebar(); if (!activeTab) renderPicker(); });
 EventsOn('hosts:reloaded', (names: string[]) => { order = names; hosts.clear(); paintSidebar(); if (!activeTab) renderPicker(); });
 
+Platform().then((p: string) => { isWindows = p === 'windows'; });
 GetSettings().then((s: any) => {
   refreshMs = (s.autoRefreshSec || 0) * 1000;
   if (s.theme === 'light') document.documentElement.classList.add('light');
