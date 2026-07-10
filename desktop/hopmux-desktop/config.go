@@ -298,6 +298,9 @@ func lookupClaude() (string, error) {
 	candidates := []string{
 		filepath.Join(home, ".local", "bin", "claude.exe"),
 		filepath.Join(home, ".local", "bin", "claude"),
+		filepath.Join(home, ".claude", "local", "claude"), // `claude migrate-installer` location
+		"/opt/homebrew/bin/claude",                        // macOS brew (Apple silicon)
+		"/usr/local/bin/claude",                           // macOS brew (Intel) / npm -g
 	}
 	if appdata := os.Getenv("APPDATA"); appdata != "" {
 		candidates = append(candidates, filepath.Join(appdata, "npm", "claude.cmd"))
@@ -335,6 +338,8 @@ func lookupCodex() (string, error) {
 	candidates := []string{
 		filepath.Join(home, ".local", "bin", "codex.exe"),
 		filepath.Join(home, ".local", "bin", "codex"),
+		"/opt/homebrew/bin/codex", // macOS brew (Apple silicon)
+		"/usr/local/bin/codex",    // macOS brew (Intel) / npm -g
 	}
 	if appdata := os.Getenv("APPDATA"); appdata != "" {
 		candidates = append(candidates, filepath.Join(appdata, "npm", "codex.cmd"))

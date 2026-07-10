@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -181,8 +182,27 @@ func (a *App) spawn(name string, args []string, dir string) string {
 	}
 	// A GUI app launched via Finder/LaunchServices does NOT inherit the shell's
 	// LANG/LC_* — force a UTF-8 locale so the remote emits real UTF-8 (else CJK
-	// renders as underscores).
-	cmd.Env = append(os.Environ(),
+	// renders as underscores). Same story for PATH: Finder gives a minimal one,
+	// which would leave a local agent (claude/codex) unable to find git/node —
+	// so extend it with the usual tool locations before handing it down.
+	env := os.Environ()
+	path := os.Getenv("PATH")
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, d := range []string{
+			filepath.Join(home, ".local", "bin"),
+			"/opt/homebrew/bin", "/usr/local/bin",
+		} {
+			if !strings.Contains(path, d) {
+				path += string(os.PathListSeparator) + d
+			}
+		}
+	}
+	for i, kv := range env { // replace in place: on Unix the FIRST entry wins
+		if len(kv) >= 5 && strings.EqualFold(kv[:5], "PATH=") {
+			env[i] = kv[:5] + path
+		}
+	}
+	cmd.Env = append(env,
 		"TERM=xterm-256color", "COLORTERM=truecolor",
 		"LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8", "LC_CTYPE=en_US.UTF-8")
 	// On Windows, a console-subsystem child (ssh.exe) spawned from this GUI app
