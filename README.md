@@ -35,6 +35,9 @@ Getting back to any single one means: remember which server → `ssh` in → hun
 - **Finds your AI sessions automatically** — scans `~/.claude/projects` (Claude Code) and `~/.codex/sessions` (Codex) on each host, newest first, each with its **resume path** and first prompt.
 - **Tabbed terminals** — open several sessions at once, switch between them, split with real `tmux` (`Ctrl-B %`).
 - **Live tmux sessions** listed too, with attached state.
+- **Start new sessions** — launch a fresh claude / codex / shell in any remote directory, with shell-style **Tab-completion** for the path.
+- **Filter sessions** — by agent kind (claude/codex/tmux), title, or directory subtree.
+- **One-click SSH key install** — for password-only hosts: log in once in the app, click 🔑, and that host never asks again.
 - **GPU at a glance** — toggle to see each host's GPU utilization (great for "which box is free?").
 - **Native desktop app** (macOS, Windows via Wails) — its own window, its own terminal, not bound to your shell — *and* a **standalone terminal TUI**.
 - **Dark & light**, keyboard-driven, colored (Claude coral, Codex cyan, tmux green).
@@ -49,8 +52,8 @@ Getting back to any single one means: remember which server → `ssh` in → hun
 - **macOS** — download `hopmux.dmg`, open it, and drag **hopmux** to Applications.
   The app is unsigned, so on first launch **right-click it → Open** (or run
   `xattr -dr com.apple.quarantine /Applications/hopmux.app`).
-- **Windows** — download `hopmux.exe` and run it. *(Windows build is not yet
-  tested on real hardware — please report issues.)*
+- **Windows** — download `hopmux-amd64-installer.exe` and run it. It installs
+  hopmux with a Start-menu entry and an uninstaller.
 
 That's it — launch hopmux and it reads your `~/.ssh/config`.
 
@@ -100,7 +103,7 @@ main.go      the CLI / TUI entry point
 
 ## Status
 
-Early but usable. macOS desktop app is the primary target; Windows builds compile but need real-hardware testing. Contributions welcome.
+Early but usable. The desktop app runs natively on both macOS and Windows. Contributions welcome.
 
 ## License
 
