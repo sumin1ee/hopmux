@@ -32,8 +32,10 @@ func toolSpecs() []map[string]any {
 		{
 			"name": "list_hosts",
 			"description": "Probe every SSH host in ~/.ssh/config and report reachability plus " +
-				"GPU utilization/memory per host. Use this first to see which servers are up " +
-				"and which GPUs are free before placing work.",
+				"per-GPU utilization/VRAM and a gpusFree count. A GPU counts as inUse when it " +
+				"holds >=1.5GB VRAM (utilization % is an instantaneous sample — do not trust " +
+				"util 0% alone). Use this first to see which servers have free GPUs before " +
+				"placing work.",
 			"inputSchema": obj(map[string]any{}),
 		},
 		{
@@ -185,13 +187,20 @@ func (s *server) listHosts() (string, bool) {
 		}
 		if len(h.GPUs) > 0 {
 			gpus := make([]map[string]any, 0, len(h.GPUs))
+			free := 0
 			for _, g := range h.GPUs {
+				if !g.InUse() {
+					free++
+				}
 				gpus = append(gpus, map[string]any{
 					"index": g.Index, "name": g.Name,
 					"utilPct": g.Util, "memUsedMiB": g.MemUsed, "memTotalMiB": g.MemTotal,
+					"inUse": g.InUse(),
 				})
 			}
 			row["gpus"] = gpus
+			row["gpusFree"] = free
+			row["gpusTotal"] = len(h.GPUs)
 		}
 		if h.Reachable {
 			row["tmuxSessions"] = len(h.Tmux)

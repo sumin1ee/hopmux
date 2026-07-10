@@ -64,6 +64,15 @@ func (g GPU) MemPct() int {
 	return g.MemUsed * 100 / g.MemTotal
 }
 
+// GPUBusyMemMiB is the VRAM threshold above which a GPU counts as in use.
+// Utilization % is an instantaneous sample (a training job can read 0% between
+// kernels), but a real job always holds VRAM — 1.5GB filters out desktop/idle
+// allocations while catching any actual workload.
+const GPUBusyMemMiB = 1536
+
+// InUse reports whether this GPU is occupied, judged by VRAM held.
+func (g GPU) InUse() bool { return g.MemUsed >= GPUBusyMemMiB }
+
 // Host is one entry from ~/.ssh/config plus whatever we discovered on it.
 type Host struct {
 	Name      string
