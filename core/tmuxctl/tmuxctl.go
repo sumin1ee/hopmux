@@ -43,6 +43,15 @@ func escSingle(s string) string {
 const locale = "export LC_ALL=C.utf8 LANG=C.utf8 2>/dev/null || " +
 	"export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8; "
 
+// loginWrap runs cmd under the user's LOGIN shell, so PATH additions from the
+// profile (nvm, conda, ~/.local/bin) apply. tmux panes run a non-login shell,
+// and on hosts where claude/codex live only on the login-shell PATH the pane
+// would die instantly — the session vanishes before attach and the terminal
+// shows "can't find session".
+func loginWrap(cmd string) string {
+	return "exec ${SHELL:-sh} -lc " + q(cmd)
+}
+
 // ResumeCommand re-enters a Claude/Codex session in its own directory.
 func ResumeCommand(a model.AgentSession) string {
 	cwd := a.CWD
@@ -52,12 +61,12 @@ func ResumeCommand(a model.AgentSession) string {
 	cd := locale + "cd " + q(cwd) + " 2>/dev/null; "
 	switch a.Agent {
 	case model.Claude:
-		return cd + "claude --resume " + q(a.SID)
+		return loginWrap(cd + "claude --resume " + q(a.SID))
 	case model.Codex:
 		if a.SID != "" {
-			return cd + "codex resume " + q(a.SID)
+			return loginWrap(cd + "codex resume " + q(a.SID))
 		}
-		return cd + "codex"
+		return loginWrap(cd + "codex")
 	default:
 		return cd + "$SHELL"
 	}
@@ -171,9 +180,9 @@ func NewSession(dir, agent string) string {
 	var cmd string
 	switch agent {
 	case "claude":
-		cmd = cd + "claude"
+		cmd = loginWrap(cd + "claude")
 	case "codex":
-		cmd = cd + "codex"
+		cmd = loginWrap(cd + "codex")
 	default:
 		cmd = cd + "exec ${SHELL:-sh} -l"
 	}
@@ -199,11 +208,13 @@ func NewDetachedSession(name, dir, agent, prompt string) string {
 		if prompt != "" {
 			cmd += " " + q(prompt)
 		}
+		cmd = loginWrap(cmd)
 	case "codex":
 		cmd = cd + "codex"
 		if prompt != "" {
 			cmd += " " + q(prompt)
 		}
+		cmd = loginWrap(cmd)
 	default:
 		cmd = cd + "exec ${SHELL:-sh} -l"
 	}
