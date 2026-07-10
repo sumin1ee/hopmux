@@ -187,6 +187,102 @@ func (a *App) AddServer(alias, hostname, port, user string) string {
 	return ""
 }
 
+// SetupMCP registers THIS executable as an MCP server for Claude Code in user
+// scope (works in every project), so the local Claude Code becomes the "main
+// agent" that can see and drive every server hopmux knows. One click, no
+// terminal needed. Returns "" on success or a human-readable error.
+func (a *App) SetupMCP() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "cannot locate the hopmux executable: " + err.Error()
+	}
+	// Preferred path: the claude CLI owns its config format. Remove-then-add is
+	// idempotent and heals a stale path from a previous install location.
+	if cli, err := lookupClaude(); err == nil {
+		_ = runQuiet(cli, "mcp", "remove", "-s", "user", "hopmux")
+		if _, err := runQuietOut(cli, "mcp", "add", "-s", "user", "hopmux", "--", exe, "mcp"); err == nil {
+			return ""
+		}
+		// CLI failed — fall through to editing the config directly.
+	}
+	// Fallback: write ~/.claude.json ourselves (user-scope mcpServers).
+	home, _ := os.UserHomeDir()
+	cfgPath := filepath.Join(home, ".claude.json")
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return "Claude Code doesn't seem to be installed (no `claude` CLI on PATH and no ~/.claude.json). " +
+			"Install it from https://claude.com/claude-code and click this again."
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "~/.claude.json exists but isn't valid JSON: " + err.Error()
+	}
+	servers, _ := cfg["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
+	servers["hopmux"] = map[string]any{
+		"type": "stdio", "command": exe, "args": []string{"mcp"}, "env": map[string]any{},
+	}
+	cfg["mcpServers"] = servers
+	_ = os.WriteFile(cfgPath+".hopmux.bak", raw, 0o600)
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err.Error()
+	}
+	if err := os.WriteFile(cfgPath, b, 0o600); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// lookupClaude finds the claude CLI: PATH first, then the usual install spots
+// (native installer, npm global). A GUI app's PATH often misses shell-profile
+// additions, so PATH alone isn't enough.
+func lookupClaude() (string, error) {
+	if p, err := exec.LookPath("claude"); err == nil {
+		return p, nil
+	}
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, ".local", "bin", "claude.exe"),
+		filepath.Join(home, ".local", "bin", "claude"),
+	}
+	if appdata := os.Getenv("APPDATA"); appdata != "" {
+		candidates = append(candidates, filepath.Join(appdata, "npm", "claude.cmd"))
+	}
+	for _, p := range candidates {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
+// runQuiet runs a CLI without a console window, ignoring output.
+func runQuiet(cli string, args ...string) error {
+	cmd := claudeCmd(cli, args...)
+	hideWindowCmd(cmd)
+	return cmd.Run()
+}
+
+func runQuietOut(cli string, args ...string) (string, error) {
+	cmd := claudeCmd(cli, args...)
+	hideWindowCmd(cmd)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// claudeCmd builds the exec.Cmd, routing .cmd/.bat shims (npm installs) through
+// cmd.exe — CreateProcess cannot start those directly.
+func claudeCmd(cli string, args ...string) *exec.Cmd {
+	low := strings.ToLower(cli)
+	if strings.HasSuffix(low, ".cmd") || strings.HasSuffix(low, ".bat") {
+		return exec.Command("cmd", append([]string{"/C", cli}, args...)...)
+	}
+	return exec.Command(cli, args...)
+}
+
 // reload re-parses the ssh config, refreshes the host list, and rescans.
 func (a *App) reload() {
 	a.entries, _ = sshconfig.Parse("~/.ssh/config")
