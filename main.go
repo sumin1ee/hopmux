@@ -12,8 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/isumin/hopmux/core/discover"
+	"github.com/isumin/hopmux/core/mcp"
 	"github.com/isumin/hopmux/core/sshconfig"
-	"github.com/isumin/hopmux/internal/mcp"
 	"github.com/isumin/hopmux/internal/ui"
 )
 

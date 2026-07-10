@@ -2,17 +2,38 @@ package main
 
 import (
 	"embed"
+	"fmt"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+
+	"github.com/isumin/hopmux/core/mcp"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
+const version = "0.2.0"
+
 func main() {
+	// `hopmux mcp` — run as a headless MCP server instead of the GUI, so the
+	// INSTALLED app is also the orchestration backend:
+	//
+	//	claude mcp add hopmux -- "C:\...\hopmux.exe" mcp
+	//
+	// This works from a GUI-subsystem exe because the MCP client (Claude Code)
+	// spawns us with stdio pipes; no console is needed.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		if err := mcp.Run(version); err != nil {
+			fmt.Fprintln(os.Stderr, "hopmux mcp:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	app := NewApp()
 
 	err := wails.Run(&options.App{
