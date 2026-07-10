@@ -313,6 +313,57 @@ func muxOpts() []string {
 	}
 }
 
+// ListDir returns the sub-directory names under dir on the host (for path
+// tab-completion when starting a new session). dir may contain a leading ~ and a
+// partial trailing segment — the remote shell expands ~ and we list the parent,
+// letting the caller filter by the partial. Non-interactive and BatchMode, so it
+// returns quickly or fails fast on a host that still needs a password.
+func ListDir(alias, dir string) []string {
+	if dir == "" {
+		dir = "~/"
+	}
+	// Only complete directories; append '/' so the UI can tell dirs apart and
+	// keep completing into them. `2>/dev/null` swallows "no such file" noise.
+	remote := "cd " + shellQuote(dir) + " 2>/dev/null && ls -1ap 2>/dev/null | grep '/$'"
+	args := append(muxOpts(),
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=6",
+		"-o", "StrictHostKeyChecking=accept-new",
+		alias, remote,
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	hideWindow(cmd)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+	var names []string
+	for _, ln := range strings.Split(out.String(), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || ln == "./" || ln == "../" {
+			continue
+		}
+		names = append(names, ln) // keeps the trailing '/'
+	}
+	return names
+}
+
+// shellQuote single-quote-wraps a path for the remote shell, but leaves a
+// leading ~ (and ~/) unquoted so the shell still expands it.
+func shellQuote(p string) string {
+	esc := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+	if p == "~" {
+		return "~"
+	}
+	if strings.HasPrefix(p, "~/") {
+		return "~/" + esc(p[2:])
+	}
+	return esc(p)
+}
+
 // RunArgs builds the argv for an interactive command on a host: TTY allocated so
 // full-screen apps (tmux/claude/codex) work, no BatchMode so auth can prompt.
 // This is what the UI hands to the terminal when attaching. It reuses the same

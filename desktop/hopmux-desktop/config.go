@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +16,110 @@ import (
 func sshConfigPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".ssh", "config")
+}
+
+func sshDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".ssh")
+}
+
+// LocalPublicKey returns the user's SSH public key text, creating an ed25519 key
+// pair first if none exists. This is the key the app installs on a host so
+// future connections need no password. Returns "" only if key generation fails.
+func (a *App) LocalPublicKey() string {
+	dir := sshDir()
+	// Prefer ed25519, fall back to rsa — whatever already exists.
+	for _, name := range []string{"id_ed25519.pub", "id_rsa.pub"} {
+		if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+			if s := strings.TrimSpace(string(b)); s != "" {
+				return s
+			}
+		}
+	}
+	// None yet: generate an ed25519 key with no passphrase.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	key := filepath.Join(dir, "id_ed25519")
+	cmd := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-f", key)
+	hideWindowCmd(cmd)
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(key + ".pub")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// EnsureIdentityFile makes sure the given host's block in ~/.ssh/config points
+// at the local private key, so once the public key is installed on the host the
+// app connects with it automatically. No-op if an IdentityFile is already set.
+// Returns "" on success (or already-present), else an error message.
+func (a *App) EnsureIdentityFile(alias string) string {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return "host is required"
+	}
+	// Pick the private key that matches the public key we hand out.
+	idFile := "~/.ssh/id_ed25519"
+	if _, err := os.Stat(filepath.Join(sshDir(), "id_ed25519")); err != nil {
+		if _, err2 := os.Stat(filepath.Join(sshDir(), "id_rsa")); err2 == nil {
+			idFile = "~/.ssh/id_rsa"
+		}
+	}
+	path := sshConfigPath()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err.Error()
+	}
+	lines := strings.Split(string(raw), "\n")
+	out := make([]string, 0, len(lines)+1)
+	inBlock := false
+	hasIdentity := false
+	injected := false
+	flush := func() {
+		// Called when leaving the target block: add IdentityFile if it lacked one.
+		if inBlock && !hasIdentity && !injected {
+			out = append(out, "    IdentityFile "+idFile)
+			injected = true
+		}
+	}
+	for _, ln := range lines {
+		trimmed := strings.TrimSpace(ln)
+		fields := strings.Fields(trimmed)
+		if len(fields) >= 2 && strings.EqualFold(fields[0], "Host") {
+			// Leaving any previous block; entering a new one.
+			flush()
+			inBlock = false
+			hasIdentity = false
+			for _, name := range fields[1:] {
+				if name == alias {
+					inBlock = true
+					break
+				}
+			}
+		} else if inBlock && len(fields) >= 1 && strings.EqualFold(fields[0], "IdentityFile") {
+			hasIdentity = true
+		}
+		out = append(out, ln)
+	}
+	flush() // in case the target block is the last one in the file
+	if hasIdentity && !injected {
+		return "" // already had an IdentityFile — nothing to do
+	}
+	if !injected {
+		return "host " + alias + " not found in ssh config"
+	}
+	if prev := raw; len(prev) > 0 {
+		_ = os.WriteFile(path+".hopmux.bak", prev, 0o600)
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o600); err != nil {
+		return err.Error()
+	}
+	a.reload()
+	return ""
 }
 
 // ReadSSHConfig returns the raw ~/.ssh/config text (for the editor in Settings).

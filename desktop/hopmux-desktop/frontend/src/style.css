@@ -125,6 +125,44 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
 .sess .l2 { color: var(--muted); font-size: 11px; margin: 1px 0 0 4px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sess.login .info { color: var(--warning); }
+
+/* ---- new-session row ---- */
+.sess.newsess { cursor: default; border: 1px dashed var(--border); }
+.sess.newsess:hover { background: transparent; }
+.tag.new { color: var(--purple); }
+.newpick { display: inline-flex; gap: 4px; }
+.chip { font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
+.chip.on { color: var(--fg); border-color: var(--purple); background: var(--sel); }
+.chip:hover { color: var(--fg); }
+
+/* ---- session-list filter bar ---- */
+.filterbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  padding: 2px 12px 8px; }
+.fsearch { flex: 1 1 120px; min-width: 100px; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 7px;
+  font-family: var(--mono); font-size: 12px; outline: none; }
+.fsearch:focus { border-color: var(--purple); }
+.fclear { flex: none; font-size: 11px; color: var(--muted); cursor: pointer; }
+.fclear:hover { color: var(--danger); }
+.sess.newsess .l2 { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.newpath { flex: 1 1 auto; min-width: 0; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 7px;
+  font-family: var(--mono); font-size: 12px; outline: none; }
+.newpath:focus { border-color: var(--purple); }
+.newgo { flex: none; font-size: 11px; padding: 3px 9px; border-radius: 6px;
+  border: 1px solid var(--purple); color: var(--purple); cursor: pointer; }
+.newgo:hover { background: var(--purple); color: var(--bg); }
+/* Tab-completion candidates, shell-style, under the path input */
+.newsug { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 5px 0 1px 4px;
+  max-height: 96px; overflow-y: auto; }
+.newsug:empty { display: none; }
+.newsug-item { font-size: 11px; padding: 1px 7px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--fg);
+  cursor: pointer; white-space: nowrap; }
+.newsug-item:hover { border-color: var(--purple); color: var(--purple); }
+.newsug-none { font-size: 11px; color: var(--muted); }
+
 .empty { color: var(--muted); padding: 16px; }
 .gpu-bar { margin-top: 4px; font-size: 12px; font-weight: 400; }
 

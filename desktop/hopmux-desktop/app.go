@@ -130,6 +130,12 @@ func (a *App) RescanHost(host string) model.Host {
 	return model.Host{Name: host}
 }
 
+// ListDir returns the sub-directory names under dir on host, for path
+// tab-completion in the "new session" input. Each name keeps a trailing '/'.
+func (a *App) ListDir(host, dir string) []string {
+	return discover.ListDir(host, dir)
+}
+
 // ---- terminal / PTY (one per tab) ----
 
 func (a *App) spawn(name string, args []string) string {

@@ -11,7 +11,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import {
   HostNames, Scan, OpenSession, SendInput, Resize, RescanHost, CloseSession,
   AddServer, GetSettings, SaveSettings, ReadSSHConfig, WriteSSHConfig, Platform,
-  AttachTab,
+  AttachTab, LocalPublicKey, EnsureIdentityFile, ListDir,
 } from '../wailsjs/go/main/App';
 import { EventsOn, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
@@ -284,36 +284,243 @@ function gpuBarHTML(h: Host): string {
   return `<div class="gpu-bar">${segs.join('&nbsp;&nbsp;·&nbsp;&nbsp;')}</div>`;
 }
 
+// ---- session-list filter (kind chips + free text over title/path) ----
+const filt = { text: '', kinds: new Set<string>() }; // kinds empty = all
+
+function passFilter(kind: string, title: string, cwd: string): boolean {
+  if (filt.kinds.size && !filt.kinds.has(kind)) return false;
+  const q = filt.text.trim().toLowerCase();
+  if (!q) return true;
+  // matching the path means "everything under that subtree" also matches
+  return title.toLowerCase().includes(q) || cwd.toLowerCase().includes(q);
+}
+
+// The bar is part of the picker's persistent top: typing re-renders only the
+// session ROWS (renderRows), never this bar — so the input keeps focus and IME
+// state, and the new-session row next to it keeps its path/Tab candidates.
+function filterBar(): HTMLElement {
+  const bar = el('div', 'filterbar');
+  const chips = new Map<string, HTMLElement>();
+  const inp = el('input', 'fsearch') as HTMLInputElement;
+  const x = el('span', 'fclear', '✕ clear') as HTMLElement;
+  const sync = () => {
+    for (const [k, c] of chips) c.classList.toggle('on', filt.kinds.has(k));
+    x.style.visibility = (filt.text || filt.kinds.size) ? 'visible' : 'hidden';
+  };
+  for (const k of ['claude', 'codex', 'tmux']) {
+    const c = el('span', 'chip', k) as HTMLElement;
+    c.onclick = (e) => {
+      e.stopPropagation();
+      if (filt.kinds.has(k)) filt.kinds.delete(k); else filt.kinds.add(k);
+      sync(); renderRows();
+    };
+    chips.set(k, c); bar.append(c);
+  }
+  inp.placeholder = 'filter by title or path…';
+  inp.value = filt.text;
+  inp.spellcheck = false;
+  inp.onclick = (e) => e.stopPropagation();
+  inp.oninput = () => { filt.text = inp.value; sync(); renderRows(); };
+  inp.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { filt.text = ''; filt.kinds.clear(); inp.value = ''; sync(); renderRows(); }
+  };
+  x.onclick = (e) => { e.stopPropagation(); filt.text = ''; filt.kinds.clear(); inp.value = ''; sync(); renderRows(); };
+  bar.append(inp, x);
+  sync();
+  return bar;
+}
+
+// The picker is two layers: a persistent top (filter bar, new-session row,
+// login/unreachable actions) keyed on the selected host & its state, and the
+// session rows below it. Filter keystrokes re-render ONLY the rows, so nothing
+// in the top loses focus, IME composition, or Tab-completion candidates.
+let pickerKey = '';
+const $pickerTop = el('div');
+const $pickerRows = el('div');
+
 function renderPicker() {
-  if (!$picker.classList.contains('hidden')) { /* only when visible */ }
-  $sessionList.innerHTML = '';
+  const h = selected !== null ? hosts.get(selected) : undefined;
+  let key: string;
   if (selected === null) {
     const scanned = order.filter((n) => hosts.get(n)?.Scanned).length;
     $pickerHead.innerHTML = `★ Recent sessions <span class="sub">· ${scanned}/${order.length} scanned</span>`;
+    key = 'recent';
+  } else if (!h) {
+    key = 'none';
+  } else if (h.AuthRequired) {
+    $pickerHead.innerHTML = `${selected} <span class="sub">${h.Hostname || ''}</span>`;
+    key = selected + '|auth';
+  } else if (!h.Reachable) {
+    $pickerHead.innerHTML = `${selected} <span class="sub">unreachable</span>`;
+    key = selected + '|unreach';
+  } else {
+    const nc = h.Agents?.filter((a) => a.Agent === 'claude').length || 0;
+    const nx = h.Agents?.filter((a) => a.Agent === 'codex').length || 0;
+    $pickerHead.innerHTML = `${selected} <span class="sub">${h.Hostname || ''} · ${h.Tmux?.length || 0} tmux · ${nc} claude · ${nx} codex</span>` + gpuBarHTML(h);
+    key = selected + '|ok';
+  }
+  // Rebuild the top only when the view target changed (different host, or the
+  // same host flipping between auth/unreachable/ok) — data-only refreshes and
+  // filter keystrokes leave it, and everything the user typed in it, alone.
+  if (key !== pickerKey) {
+    pickerKey = key;
+    $pickerTop.replaceChildren();
+    $sessionList.replaceChildren($pickerTop, $pickerRows);
+    if (selected === null) {
+      $pickerTop.append(filterBar());
+    } else if (h?.AuthRequired) {
+      const r = el('div', 'sess login'); r.append(el('div', 'info', '⚿ needs interactive login — click to log in'));
+      r.onclick = () => openTerminal({ host: selected!, kind: 'login', name: '', agent: '', sid: '', cwd: '' }, 'login', 'var(--warning)');
+      $pickerTop.append(r);
+      // Once logged in, install our key so this host stops needing a password.
+      const k = el('div', 'sess login');
+      k.append(el('div', 'info', '🔑 install SSH key — log in above first, then click (no more passwords)'));
+      k.onclick = () => installKey(selected!);
+      $pickerTop.append(k);
+    } else if (h && !h.Reachable) {
+      const r = el('div', 'sess login'); r.append(el('div', 'info', '✗ ' + (h.Err || 'unreachable') + ' — click to try ssh'));
+      r.onclick = () => openTerminal({ host: selected!, kind: 'login', name: '', agent: '', sid: '', cwd: '' }, 'ssh', 'var(--danger)');
+      $pickerTop.append(r);
+    } else if (h) {
+      $pickerTop.append(filterBar(), newSessionRow(selected!));
+    }
+  }
+  renderRows();
+}
+
+// renderRows repaints just the session rows under the persistent picker top,
+// applying the current filter.
+function renderRows() {
+  $pickerRows.replaceChildren();
+  if (selected === null) {
     const rec = recentAgents();
-    if (!rec.length) { $sessionList.append(el('div', 'empty', 'scanning…')); return; }
-    for (const a of rec) $sessionList.append(agentRow(a, true));
+    if (!rec.length) { $pickerRows.append(el('div', 'empty', 'scanning…')); return; }
+    const shown = rec.filter((a) => passFilter(a.Agent, a.Title || '', a.CWD || ''));
+    for (const a of shown) $pickerRows.append(agentRow(a, true));
+    if (!shown.length) $pickerRows.append(el('div', 'empty', 'no sessions match the filter'));
     return;
   }
-  const h = hosts.get(selected); if (!h) return;
-  if (h.AuthRequired) {
-    $pickerHead.innerHTML = `${selected} <span class="sub">${h.Hostname || ''}</span>`;
-    const r = el('div', 'sess login'); r.append(el('div', 'info', '⚿ needs interactive login — click to log in'));
-    r.onclick = () => openTerminal({ host: selected!, kind: 'login', name: '', agent: '', sid: '', cwd: '' }, 'login', 'var(--warning)');
-    $sessionList.append(r); return;
+  const h = hosts.get(selected);
+  if (!h || h.AuthRequired || !h.Reachable) return;
+  const tShown = (h.Tmux || []).filter((t) => passFilter('tmux', t.Name, ''));
+  const aShown = (h.Agents || []).slice().sort((x, y) => y.MTime - x.MTime)
+    .filter((a) => passFilter(a.Agent, a.Title || '', a.CWD || ''));
+  for (const t of tShown) $pickerRows.append(tmuxRow(t));
+  for (const a of aShown) $pickerRows.append(agentRow(a, false));
+  if (!tShown.length && !aShown.length) {
+    $pickerRows.append(el('div', 'empty',
+      (filt.text || filt.kinds.size) ? 'no sessions match the filter' : 'no sessions here yet'));
   }
-  if (!h.Reachable) {
-    $pickerHead.innerHTML = `${selected} <span class="sub">unreachable</span>`;
-    const r = el('div', 'sess login'); r.append(el('div', 'info', '✗ ' + (h.Err || 'unreachable') + ' — click to try ssh'));
-    r.onclick = () => openTerminal({ host: selected!, kind: 'login', name: '', agent: '', sid: '', cwd: '' }, 'ssh', 'var(--danger)');
-    $sessionList.append(r); return;
+}
+
+// newSessionRow renders the "+ new session" control: pick claude/codex/shell,
+// type a working directory (Tab completes remote paths), Enter/click to launch.
+function newSessionRow(host: string): HTMLElement {
+  const r = el('div', 'sess newsess');
+  const l1 = el('div', 'l1');
+  l1.append(el('span', 'tag new', '＋ new'));
+  // agent picker
+  let agent = 'claude';
+  const pick = el('span', 'newpick') as HTMLElement;
+  const opts: [string, string][] = [['claude', 'claude'], ['codex', 'codex'], ['', 'shell']];
+  const chips: HTMLElement[] = [];
+  for (const [val, label] of opts) {
+    const c = el('span', 'chip' + (val === agent ? ' on' : ''), label) as HTMLElement;
+    c.onclick = (e) => { e.stopPropagation(); agent = val; for (const x of chips) x.classList.remove('on'); c.classList.add('on'); path.focus(); };
+    chips.push(c); pick.append(c);
   }
-  const nc = h.Agents?.filter((a) => a.Agent === 'claude').length || 0;
-  const nx = h.Agents?.filter((a) => a.Agent === 'codex').length || 0;
-  $pickerHead.innerHTML = `${selected} <span class="sub">${h.Hostname || ''} · ${h.Tmux?.length || 0} tmux · ${nc} claude · ${nx} codex</span>` + gpuBarHTML(h);
-  for (const t of (h.Tmux || [])) $sessionList.append(tmuxRow(t));
-  for (const a of (h.Agents || []).slice().sort((x, y) => y.MTime - x.MTime)) $sessionList.append(agentRow(a, false));
-  if (!sessionCount(h)) $sessionList.append(el('div', 'empty', 'no sessions here yet'));
+  l1.append(pick);
+  // path input with remote tab-completion
+  const path = el('input', 'newpath') as HTMLInputElement;
+  path.placeholder = '~ (working dir — Tab to complete)';
+  path.spellcheck = false;
+  path.onclick = (e) => e.stopPropagation();
+  // warm the listing for the current level as soon as the field is focused, so
+  // the first Tab doesn't pay the ssh round-trip
+  path.onfocus = () => {
+    const v = path.value, s = v.lastIndexOf('/');
+    prefetchDir(host, s >= 0 ? v.slice(0, s + 1) : '~/');
+  };
+  // candidate list shown under the input, like a shell's second-Tab listing
+  const sug = el('div', 'newsug');
+  path.onkeydown = async (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault(); e.stopPropagation();
+      await completePath(host, path, sug);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      launchNew(host, agent, path.value.trim());
+    } else if (e.key === 'Escape') {
+      sug.replaceChildren();
+    }
+    // stop the global arrow/hotkey handler from hijacking typing
+    e.stopPropagation();
+  };
+  const go = el('span', 'newgo', 'start ⏎') as HTMLElement;
+  go.onclick = (e) => { e.stopPropagation(); launchNew(host, agent, path.value.trim()); };
+  const l2 = el('div', 'l2'); l2.append(path, go);
+  r.append(l1, l2, sug);
+  return r;
+}
+
+function launchNew(host: string, agent: string, dir: string) {
+  const label = agent === '' ? 'shell' : agent;
+  const color = agent === 'codex' ? 'var(--codex)' : agent === '' ? 'var(--tmux)' : 'var(--claude)';
+  openTerminal({ host, kind: 'newSession', name: '', agent, sid: '', cwd: dir }, `new ${label}`, color);
+}
+
+// Each ListDir is a fresh ssh connection (no ControlMaster on Windows), which
+// costs ~a second. Cache listings briefly and prefetch the just-completed dir so
+// repeated Tabs and dive-ins feel instant.
+const dirCache = new Map<string, { t: number; dirs: string[] }>();
+const DIR_TTL = 60_000;
+async function cachedListDir(host: string, parent: string): Promise<string[]> {
+  const key = host + '\0' + parent;
+  const hit = dirCache.get(key);
+  if (hit && Date.now() - hit.t < DIR_TTL) return hit.dirs;
+  const dirs: string[] = (await ListDir(host, parent)) || [];
+  dirCache.set(key, { t: Date.now(), dirs });
+  return dirs;
+}
+function prefetchDir(host: string, parent: string) { void cachedListDir(host, parent); }
+
+// completePath asks the backend for the directories under what's typed so far and
+// completes like a shell: fills the unique match, or the longest common prefix.
+// When several candidates remain they are listed under the input (sug), each
+// clickable — the terminal's "second Tab shows the choices" behavior.
+async function completePath(host: string, input: HTMLInputElement, sug: HTMLElement) {
+  const cur = input.value;
+  // split into an already-settled parent dir and the partial last segment
+  const slash = cur.lastIndexOf('/');
+  const parent = slash >= 0 ? cur.slice(0, slash + 1) : '';
+  const partial = slash >= 0 ? cur.slice(slash + 1) : cur;
+  const dirs: string[] = await cachedListDir(host, parent || '~/');
+  if (!dirs || !dirs.length) { sug.replaceChildren(el('span', 'newsug-none', '(no subdirectories)')); return; }
+  const matches = dirs.filter((d: string) => d.startsWith(partial));
+  if (!matches.length) { sug.replaceChildren(el('span', 'newsug-none', '(no match)')); return; }
+  if (matches.length === 1) {
+    input.value = parent + matches[0]; // includes trailing '/'
+    sug.replaceChildren();
+    prefetchDir(host, input.value); // warm the next level for the next Tab
+    return;
+  }
+  // longest common prefix across matches
+  let lcp = matches[0];
+  for (const m of matches) { while (!m.startsWith(lcp)) lcp = lcp.slice(0, -1); }
+  if (lcp.length > partial.length) input.value = parent + lcp;
+  // list the remaining candidates; clicking one settles it and re-lists inside
+  sug.replaceChildren();
+  for (const m of matches) {
+    const c = el('span', 'newsug-item', m) as HTMLElement;
+    c.onclick = async (e) => {
+      e.stopPropagation();
+      input.value = parent + m;
+      input.focus();
+      await completePath(host, input, sug); // dive in: list its subdirectories
+    };
+    sug.append(c);
+  }
 }
 
 function tmuxRow(t: Tmux): HTMLElement {
@@ -341,7 +548,33 @@ async function openTerminal(req: any, title: string, color: string) {
   const kind = req.kind === 'agent' ? req.agent : '';
   const tab = newTab(id, `${req.host} · ${title}`, color, kind);
   activateTab(tab.id);
-  if (req.kind === 'login') startLoginPoll(req.host);
+  if (req.kind === 'login') { loginTab = { id, host: req.host }; startLoginPoll(req.host); }
+}
+
+// Tracks the most recent interactive-login tab so "Install key" can inject the
+// authorized_keys command into that already-authenticated shell.
+let loginTab: { id: string; host: string } | null = null;
+
+// installKey pushes the local public key into the login tab's authenticated
+// shell (no password re-entry — that session is already logged in), then points
+// the host's ssh config at the matching private key so future connections are
+// key-based. After this the host stops needing interactive login.
+async function installKey(host: string) {
+  if (!loginTab || loginTab.host !== host) {
+    alert('Open the login tab for ' + host + ' and sign in first, then install the key.');
+    return;
+  }
+  const pub = await LocalPublicKey();
+  if (!pub) { alert('Could not read or create a local SSH key.'); return; }
+  // Append the key only if it is not already present. One line, POSIX sh.
+  const cmd =
+    'mkdir -p ~/.ssh && chmod 700 ~/.ssh && ' +
+    "touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && " +
+    "grep -qxF '" + pub + "' ~/.ssh/authorized_keys || echo '" + pub + "' >> ~/.ssh/authorized_keys; " +
+    "echo '[hopmux] key installed'\n";
+  SendInput(loginTab.id, cmd);
+  const err = await EnsureIdentityFile(host);
+  if (err) alert('Key sent, but updating ssh config failed: ' + err);
 }
 
 // attention() — the agent wants input: bounce its mascot, and if the tab isn't
@@ -598,6 +831,11 @@ document.addEventListener('keydown', (ev) => {
     }
   }
   if (terminalActive()) return; // navigation keys go to the xterm
+  // This handler runs in the CAPTURE phase — before any input's own keydown —
+  // so when the user is typing in a text field (filter, new-session path, modal
+  // fields) we must bail out here or j/k/Enter would hijack picker navigation.
+  const tgt = ev.target as HTMLElement | null;
+  if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA')) return;
   // picker navigation
   const rows = Array.from($sessionList.querySelectorAll('.sess')) as HTMLElement[];
   if (!rows.length) return;

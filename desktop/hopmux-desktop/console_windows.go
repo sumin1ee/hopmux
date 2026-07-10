@@ -3,7 +3,11 @@
 package main
 
 import (
+	"os/exec"
+	"syscall"
+
 	pty "github.com/aymanbagabas/go-pty"
+	"golang.org/x/sys/windows"
 )
 
 // hideConsole is intentionally a no-op.
@@ -19,3 +23,14 @@ import (
 // ConPTY child, so it still uses CREATE_NO_WINDOW to suppress its console — see
 // core/discover/hidewindow_windows.go. That path is unaffected by this.)
 func hideConsole(cmd *pty.Cmd) {}
+
+// hideWindowCmd suppresses the console window for a one-shot exec.Command (e.g.
+// ssh-keygen) launched from this GUI app. Unlike a ConPTY child, a plain
+// exec.Command is not attached to a pseudoconsole, so CREATE_NO_WINDOW here is
+// correct and harmless — it just hides the flash.
+func hideWindowCmd(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_NO_WINDOW
+}
