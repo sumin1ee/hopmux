@@ -16,7 +16,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	// `hopmux mcp` — run as a headless MCP server instead of the GUI, so the

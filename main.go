@@ -17,7 +17,7 @@ import (
 	"github.com/isumin/hopmux/internal/ui"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	// `hopmux mcp` — serve the engine as MCP tools for an orchestrating agent

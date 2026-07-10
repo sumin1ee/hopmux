@@ -7,6 +7,7 @@
 
 # Desktop app (Wails) build artifacts & deps
 desktop/hopmux-desktop/build/bin/
+desktop/hopmux-desktop/build/windows/installer/tmp/
 desktop/hopmux-desktop/frontend/node_modules/
 desktop/hopmux-desktop/frontend/dist/
 desktop/hopmux-desktop/frontend/wailsjs/
