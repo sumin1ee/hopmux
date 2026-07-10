@@ -167,10 +167,27 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
 .gpu-bar { margin-top: 4px; font-size: 12px; font-weight: 400; }
 
 /* terminals */
-#terminals { position: absolute; inset: 0; }
+#terminals { position: absolute; inset: 0; display: flex; }
 #terminals.hidden { display: none; }
 .term-wrap { position: absolute; inset: 0; padding: 4px 0 4px 8px; }
 .term-wrap.hidden { display: none; }
+
+/* ---- split layout (drag a tab to split) ---- */
+.pane { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; }
+.pane.focused { box-shadow: inset 0 0 0 1px var(--border); }
+.split { display: flex; flex: 1 1 0; min-width: 0; min-height: 0; }
+.split.row { flex-direction: row; }
+.split.col { flex-direction: column; }
+.split > .part { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.split > .part > * { flex: 1 1 0; min-width: 0; min-height: 0; }
+.splitter { flex: none; background: var(--border); z-index: 5; }
+.splitter:hover { background: var(--codex); }
+.split.row > .splitter { width: 4px; cursor: col-resize; }
+.split.col > .splitter { height: 4px; cursor: row-resize; }
+.drop-hint { position: absolute; z-index: 40; pointer-events: none; border-radius: 6px;
+  background: color-mix(in srgb, var(--codex) 20%, transparent);
+  border: 1px solid var(--codex); }
+.drop-hint.hidden { display: none; }
 
 .server .kbsel, .server.kbsel { box-shadow: inset 2px 0 0 var(--codex); }
 

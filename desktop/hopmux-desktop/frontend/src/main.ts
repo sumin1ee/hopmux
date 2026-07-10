@@ -11,7 +11,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import {
   HostNames, Scan, OpenSession, SendInput, Resize, RescanHost, CloseSession,
   AddServer, GetSettings, SaveSettings, ReadSSHConfig, WriteSSHConfig, Platform,
-  AttachTab, LocalPublicKey, EnsureIdentityFile, ListDir,
+  AttachTab, LocalPublicKey, EnsureIdentityFile, ListDir, SetupMCP,
 } from '../wailsjs/go/main/App';
 import { EventsOn, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
@@ -98,7 +98,6 @@ function newTab(id: string, title: string, color: string, kind: string): Tab {
 
   const wrap = document.createElement('div');
   wrap.className = 'term-wrap';
-  $terminals.append(wrap);
 
   const tabEl = document.createElement('div');
   tabEl.className = 'tab';
@@ -111,12 +110,24 @@ function newTab(id: string, title: string, color: string, kind: string): Tab {
     if ((e.target as HTMLElement).classList.contains('tclose')) { closeTab(id); return; }
     activateTab(id);
   };
+  // Drag the tab into the terminal area to split (edges) or move (center).
+  tabEl.draggable = true;
+  tabEl.addEventListener('dragstart', (e) => {
+    dragTabId = id;
+    e.dataTransfer!.effectAllowed = 'move';
+    e.dataTransfer!.setData('text/plain', id);
+  });
+  tabEl.addEventListener('dragend', () => {
+    dragTabId = null;
+    $dropHint.classList.add('hidden');
+  });
   $tabbar.append(tabEl);
   keepNewBtnLast();
 
   const tab: Tab = { id, title, color, kind, term, fit, wrap, tabEl,
     mascot: tabEl.querySelector('.mascot') as HTMLElement || undefined };
   tabs.push(tab);
+  attachTabToPane(id, focusedPane); // the wrap lives inside its pane
 
   // Attention: the agent rings the bell (or emits an OSC 9 / OSC 777 desktop
   // notification) when it wants you — bounce the mascot and flag the tab.
@@ -163,16 +174,222 @@ function fitTab(tab: Tab) {
   try { tab.fit.fit(); Resize(tab.id, tab.term.cols, tab.term.rows); } catch {}
 }
 
+// ---------- split layout (drag a tab to split, VSCode-style) ----------
+// The terminal area is a binary tree: leaves are panes, inner nodes row/col
+// splits. Each pane owns some tabs and shows one; every pane is visible at
+// once. Drag a tab onto a pane's edge to split it, onto its middle to move the
+// tab there. The single global tab bar stays: clicking a tab reveals it in
+// whichever pane owns it.
+interface Pane { id: number; el: HTMLElement; tabIds: string[]; active: string | null }
+type LNode =
+  | { pane: Pane }
+  | { dir: 'row' | 'col'; a: LNode; b: LNode; ratio: number };
+
+let panes: Pane[] = [];
+let paneSeq = 0;
+
+function newPane(): Pane {
+  const el = document.createElement('div');
+  el.className = 'pane';
+  const p: Pane = { id: ++paneSeq, el, tabIds: [], active: null };
+  // Clicking anywhere inside focuses this pane's tab (capture — xterm eats clicks).
+  el.addEventListener('mousedown', () => { if (p.active) activateTab(p.active); }, true);
+  panes.push(p);
+  return p;
+}
+
+let rootNode: LNode = { pane: newPane() };
+let focusedPane: Pane = (rootNode as { pane: Pane }).pane;
+
+const $dropHint = document.createElement('div');
+$dropHint.className = 'drop-hint hidden';
+
+function paneOf(id: string): Pane | undefined { return panes.find((p) => p.tabIds.includes(id)); }
+function firstPane(n: LNode): Pane { return 'pane' in n ? n.pane : firstPane(n.a); }
+
+// renderLayout rebuilds the split scaffolding. Pane elements persist across
+// renders (they hold live xterm DOM); only the boxes around them are remade.
+function renderLayout() {
+  const build = (n: LNode): HTMLElement => {
+    if ('pane' in n) return n.pane.el;
+    const box = document.createElement('div');
+    box.className = 'split ' + n.dir;
+    const a = document.createElement('div'); a.className = 'part';
+    const b = document.createElement('div'); b.className = 'part';
+    a.style.flex = `${n.ratio} 1 0`; b.style.flex = `${1 - n.ratio} 1 0`;
+    a.append(build(n.a)); b.append(build(n.b));
+    const bar = document.createElement('div');
+    bar.className = 'splitter';
+    bar.onpointerdown = (e) => {
+      e.preventDefault();
+      const horiz = n.dir === 'row';
+      let raf = 0;
+      const move = (ev: PointerEvent) => {
+        const r = box.getBoundingClientRect();
+        let ratio = horiz ? (ev.clientX - r.left) / r.width : (ev.clientY - r.top) / r.height;
+        n.ratio = Math.min(0.85, Math.max(0.15, ratio));
+        a.style.flex = `${n.ratio} 1 0`; b.style.flex = `${1 - n.ratio} 1 0`;
+        cancelAnimationFrame(raf); raf = requestAnimationFrame(fitVisible);
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        fitVisible();
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
+    box.append(a, bar, b);
+    return box;
+  };
+  $terminals.replaceChildren(build(rootNode), $dropHint);
+  fitVisible();
+}
+
+function fitVisible() {
+  for (const p of panes) {
+    if (!p.active) continue;
+    const t = tabs.find((x) => x.id === p.active);
+    if (t) fitTab(t);
+  }
+}
+
+// syncPanes applies visibility: each pane shows exactly its active tab; the
+// global tab bar highlights the focused tab; the focused pane gets a ring
+// (only when there's more than one pane to tell apart).
+function syncPanes() {
+  const multi = panes.length > 1;
+  for (const p of panes) {
+    p.el.classList.toggle('focused', multi && p === focusedPane);
+    for (const tid of p.tabIds) {
+      const t = tabs.find((x) => x.id === tid);
+      if (t) t.wrap.classList.toggle('hidden', tid !== p.active);
+    }
+  }
+  for (const t of tabs) t.tabEl.classList.toggle('active', t.id === activeTab);
+}
+
+function attachTabToPane(tabId: string, p: Pane) {
+  p.tabIds.push(tabId);
+  p.active = tabId;
+  const t = tabs.find((x) => x.id === tabId);
+  if (t) p.el.append(t.wrap);
+}
+
+// detachTabFromPane removes the tab from its pane; a pane left empty (and not
+// the last one) collapses, giving its space back to its sibling.
+function detachTabFromPane(tabId: string) {
+  const p = paneOf(tabId);
+  if (!p) return;
+  p.tabIds = p.tabIds.filter((x) => x !== tabId);
+  if (p.active === tabId) p.active = p.tabIds[p.tabIds.length - 1] || null;
+  if (!p.tabIds.length && panes.length > 1) {
+    panes = panes.filter((x) => x !== p);
+    p.el.remove();
+    const prune = (n: LNode): LNode | null => {
+      if ('pane' in n) return n.pane === p ? null : n;
+      const a = prune(n.a), b = prune(n.b);
+      if (a && b) { n.a = a; n.b = b; return n; }
+      return a || b;
+    };
+    rootNode = prune(rootNode) || { pane: newPane() };
+    if (focusedPane === p) focusedPane = firstPane(rootNode);
+    renderLayout();
+  }
+}
+
+// splitPane puts the tab into a NEW pane on the given side of target.
+function splitPane(target: Pane, side: 'left' | 'right' | 'top' | 'bottom', tabId: string) {
+  const src = paneOf(tabId);
+  if (src === target && src!.tabIds.length === 1) return; // splitting itself alone: no-op
+  detachTabFromPane(tabId); // may collapse the source pane (target survives: guarded above)
+  const np = newPane();
+  attachTabToPane(tabId, np);
+  const dir: 'row' | 'col' = side === 'left' || side === 'right' ? 'row' : 'col';
+  const newFirst = side === 'left' || side === 'top';
+  const replace = (n: LNode): LNode => {
+    if ('pane' in n) {
+      if (n.pane !== target) return n;
+      const old: LNode = { pane: target }, fresh: LNode = { pane: np };
+      return { dir, a: newFirst ? fresh : old, b: newFirst ? old : fresh, ratio: 0.5 };
+    }
+    n.a = replace(n.a); n.b = replace(n.b); return n;
+  };
+  rootNode = replace(rootNode);
+  renderLayout();
+  activateTab(tabId);
+}
+
+function moveTabToPane(tabId: string, target: Pane) {
+  if (paneOf(tabId) === target) { activateTab(tabId); return; }
+  detachTabFromPane(tabId);
+  attachTabToPane(tabId, target);
+  renderLayout();
+  activateTab(tabId);
+}
+
+// --- drag & drop: tab -> pane zones ---
+let dragTabId: string | null = null;
+
+function paneAt(x: number, y: number): Pane | undefined {
+  return panes.find((p) => {
+    const r = p.el.getBoundingClientRect();
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+  });
+}
+function zoneAt(p: Pane, x: number, y: number): 'left' | 'right' | 'top' | 'bottom' | 'center' {
+  const r = p.el.getBoundingClientRect();
+  const rx = (x - r.left) / r.width, ry = (y - r.top) / r.height;
+  if (rx < 0.25) return 'left';
+  if (rx > 0.75) return 'right';
+  if (ry < 0.25) return 'top';
+  if (ry > 0.75) return 'bottom';
+  return 'center';
+}
+function showDropHint(p: Pane, zone: string) {
+  const r = p.el.getBoundingClientRect(), tr = $terminals.getBoundingClientRect();
+  let left = r.left - tr.left, top = r.top - tr.top, width = r.width, height = r.height;
+  if (zone === 'left') width /= 2;
+  else if (zone === 'right') { left += width / 2; width /= 2; }
+  else if (zone === 'top') height /= 2;
+  else if (zone === 'bottom') { top += height / 2; height /= 2; }
+  Object.assign($dropHint.style, { left: left + 'px', top: top + 'px', width: width + 'px', height: height + 'px' });
+  $dropHint.classList.remove('hidden');
+}
+
+$terminals.addEventListener('dragover', (e) => {
+  if (!dragTabId) return;
+  e.preventDefault();
+  const p = paneAt(e.clientX, e.clientY);
+  if (!p) { $dropHint.classList.add('hidden'); return; }
+  showDropHint(p, zoneAt(p, e.clientX, e.clientY));
+});
+$terminals.addEventListener('dragleave', (e) => {
+  if (e.target === $terminals) $dropHint.classList.add('hidden');
+});
+$terminals.addEventListener('drop', (e) => {
+  if (!dragTabId) return;
+  e.preventDefault();
+  $dropHint.classList.add('hidden');
+  const id = dragTabId; dragTabId = null;
+  const p = paneAt(e.clientX, e.clientY);
+  if (!p) return;
+  const zone = zoneAt(p, e.clientX, e.clientY);
+  if (zone === 'center') moveTabToPane(id, p);
+  else splitPane(p, zone, id);
+});
+
 function activateTab(id: string) {
+  const p = paneOf(id);
+  if (!p) return;
   activeTab = id;
+  p.active = id;
+  focusedPane = p;
   $picker.classList.add('hidden');
   $terminals.classList.remove('hidden');
-  for (const t of tabs) {
-    const on = t.id === id;
-    t.wrap.classList.toggle('hidden', !on);
-    t.tabEl.classList.toggle('active', on);
-    if (on) { t.tabEl.classList.remove('attn'); t.sawOutput = false; setTimeout(() => { fitTab(t); t.term.focus(); }, 0); }
-  }
+  const t = tabs.find((x) => x.id === id);
+  if (t) { t.tabEl.classList.remove('attn'); t.sawOutput = false; setTimeout(() => { fitTab(t); t.term.focus(); }, 0); }
+  syncPanes();
   paintSidebar();
 }
 
@@ -182,12 +399,16 @@ function closeTab(id: string) {
   const t = tabs[i];
   clearTimeout(t.idleTimer);
   CloseSession(id);
+  const p = paneOf(id);
   t.term.dispose(); t.wrap.remove(); t.tabEl.remove();
   tabs.splice(i, 1);
+  detachTabFromPane(id);
   if (activeTab === id) {
-    const next = tabs[i] || tabs[i - 1];
-    if (next) activateTab(next.id);
-    else showPicker();
+    // prefer the same pane's remaining tab, else any tab, else the picker
+    const nid = (p && p.tabIds.length ? p.active : null) || (tabs[i] || tabs[i - 1])?.id || null;
+    if (nid) activateTab(nid); else showPicker();
+  } else {
+    syncPanes();
   }
 }
 
@@ -199,7 +420,8 @@ function showPicker() {
   renderPicker();
 }
 
-window.addEventListener('resize', () => { const t = tabs.find((x) => x.id === activeTab); if (t) fitTab(t); });
+renderLayout(); // mount the initial single-pane layout
+window.addEventListener('resize', fitVisible);
 
 // ---------- helpers ----------
 function rel(mtime: number): string {
@@ -638,6 +860,27 @@ document.getElementById('add-server')!.onclick = () => {
     if (err) { document.getElementById('f-err')!.textContent = err; return; }
     closeModal();
   };
+};
+
+// ---- Main agent (one-click: register hopmux as Claude Code MCP tools) ----
+document.getElementById('setup-agent')!.onclick = async () => {
+  openModal('Main agent', `
+    <div class="hint" id="agent-msg" style="white-space:pre-line">Registering hopmux as Claude Code tools…</div>
+    <div class="modal-actions"><div class="btn primary" id="agent-ok">Close</div></div>`);
+  document.getElementById('agent-ok')!.onclick = closeModal;
+  const err = await SetupMCP();
+  const msg = document.getElementById('agent-msg');
+  if (!msg) return; // modal was closed meanwhile
+  msg.textContent = err
+    ? 'Setup failed: ' + err
+    : 'Done — hopmux is now a tool set for Claude Code (user scope, every project).\n\n' +
+      'Open a terminal anywhere, run  claude , and ask things like:\n' +
+      '  ·  which server has a free GPU right now?\n' +
+      '  ·  move project X from Poseidon to Hinton and rerun the experiment\n\n' +
+      'Claude can list every server’s sessions & GPUs, run commands, copy\n' +
+      'between servers, and start remote claude/codex sessions — all of which\n' +
+      'also show up here in hopmux.\n\n' +
+      'Already-running claude sessions need a restart to pick this up.';
 };
 
 // ---- Settings ----
