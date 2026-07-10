@@ -13,12 +13,23 @@ import (
 
 	"github.com/isumin/hopmux/core/discover"
 	"github.com/isumin/hopmux/core/sshconfig"
+	"github.com/isumin/hopmux/internal/mcp"
 	"github.com/isumin/hopmux/internal/ui"
 )
 
 const version = "0.2.0"
 
 func main() {
+	// `hopmux mcp` — serve the engine as MCP tools for an orchestrating agent
+	// (e.g. `claude mcp add hopmux -- hopmux mcp`). Checked before flag parsing
+	// so the subcommand isn't mistaken for a positional arg.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		if err := mcp.Run(version); err != nil {
+			fmt.Fprintln(os.Stderr, "hopmux mcp:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	var (
 		demo       = flag.Bool("demo", false, "run against built-in mock data (no servers needed)")
 		only       = flag.String("only", "", "comma-separated subset of hosts")

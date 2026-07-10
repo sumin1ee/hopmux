@@ -1,5 +1,6 @@
 # Go
 /hopmux
+/hopmux.exe
 /dist/
 *.test
 *.out

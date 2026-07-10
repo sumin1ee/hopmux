@@ -3,6 +3,7 @@ package discover
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -311,6 +312,34 @@ func muxOpts() []string {
 		"-o", "ControlPath=" + filepath.Join(controlDir(), "%C"),
 		"-o", "ControlPersist=120s",
 	}
+}
+
+// RunCommand executes command on alias non-interactively (BatchMode, no TTY)
+// and returns stdout, stderr, and the remote exit code. err is set only for
+// local/transport failures — a remote non-zero exit is NOT an err, it's code.
+func RunCommand(alias, command string, timeout time.Duration) (string, string, int, error) {
+	args := append(muxOpts(),
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=10",
+		"-o", "StrictHostKeyChecking=accept-new",
+		alias, command)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	hideWindow(cmd)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return out.String(), errb.String(), -1, fmt.Errorf("timed out after %s", timeout)
+	}
+	code := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			code, err = ee.ExitCode(), nil
+		}
+	}
+	return out.String(), errb.String(), code, err
 }
 
 // ListDir returns the sub-directory names under dir on the host (for path

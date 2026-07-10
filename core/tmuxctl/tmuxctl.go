@@ -183,6 +183,34 @@ func NewSession(dir, agent string) string {
 	return body + "; tmux set -g mouse on 2>/dev/null; tmux set -g history-limit 10000 2>/dev/null; tmux attach -t " + q(Session)
 }
 
+// NewDetachedSession returns the shell command that starts an agent (or shell)
+// in dir inside a DETACHED tmux session named name — no attach, for automation
+// (the MCP server uses this so an orchestrating agent can launch remote work).
+// prompt, when non-empty, is passed to claude/codex as the initial prompt.
+func NewDetachedSession(name, dir, agent, prompt string) string {
+	if dir == "" {
+		dir = "~"
+	}
+	cd := locale + "cd " + shellPath(dir) + " && "
+	var cmd string
+	switch agent {
+	case "claude":
+		cmd = cd + "claude"
+		if prompt != "" {
+			cmd += " " + q(prompt)
+		}
+	case "codex":
+		cmd = cd + "codex"
+		if prompt != "" {
+			cmd += " " + q(prompt)
+		}
+	default:
+		cmd = cd + "exec ${SHELL:-sh} -l"
+	}
+	return "tmux new-session -d -s " + q(name) + " " + q(cmd) + "; " +
+		"tmux set -g mouse on 2>/dev/null; tmux set -g history-limit 10000 2>/dev/null"
+}
+
 // shellPath quotes a path for the remote shell but leaves a leading ~ unquoted so
 // the shell still expands it (quoting "~/x" would stop ~ expansion).
 func shellPath(p string) string {
