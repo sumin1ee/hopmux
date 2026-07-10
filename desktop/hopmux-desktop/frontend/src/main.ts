@@ -11,7 +11,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import {
   HostNames, Scan, OpenSession, SendInput, Resize, RescanHost, CloseSession,
   AddServer, GetSettings, SaveSettings, ReadSSHConfig, WriteSSHConfig, Platform,
-  AttachTab, LocalPublicKey, EnsureIdentityFile, ListDir, SetupMCP,
+  AttachTab, LocalPublicKey, EnsureIdentityFile, ListDir, SetupMCP, OpenMainAgent, AgentCLIs,
 } from '../wailsjs/go/main/App';
 import { EventsOn, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
@@ -453,8 +453,57 @@ function gpuColor(pct: number): string { return pct >= 80 ? 'var(--danger)' : pc
 function miniBar(pct: number, w = 6): string { const f = Math.max(0, Math.min(w, Math.round((pct / 100) * w))); return '▓'.repeat(f) + '░'.repeat(w - f); }
 
 // ---------- sidebar ----------
+// The Main Agent tab runs a LOCAL agent CLI (claude or codex — whichever the
+// user has), which drives every server through hopmux's MCP tools. One tab per
+// agent: reopening focuses the existing tab.
+const mainTabs: Record<string, string> = {};
+async function openMainAgent() {
+  const avail: string[] = (await AgentCLIs()) || [];
+  if (!avail.length) {
+    openModal('Main Agent', `
+      <div class="hint" style="white-space:pre-line">No agent CLI found on this machine.
+Install Claude Code (https://claude.com/claude-code) or Codex (npm i -g @openai/codex), then try again.</div>
+      <div class="modal-actions"><div class="btn primary" id="ma-ok">Close</div></div>`);
+    document.getElementById('ma-ok')!.onclick = closeModal;
+    return;
+  }
+  if (avail.length === 1) { openMainAgentAs(avail[0]); return; }
+  openModal('Main Agent', `
+    <div class="hint">Both agents are installed — which one?</div>
+    <div class="modal-actions">
+      <div class="btn primary" id="ma-claude">◉ Claude Code</div>
+      <div class="btn primary" id="ma-codex">◉ Codex</div>
+    </div>`);
+  document.getElementById('ma-claude')!.onclick = () => { closeModal(); openMainAgentAs('claude'); };
+  document.getElementById('ma-codex')!.onclick = () => { closeModal(); openMainAgentAs('codex'); };
+}
+
+async function openMainAgentAs(agent: string) {
+  const existing = mainTabs[agent] ? tabs.find((x) => x.id === mainTabs[agent]) : undefined;
+  if (existing) { activateTab(existing.id); return; }
+  const id = await OpenMainAgent(agent);
+  if (!id) return;
+  mainTabs[agent] = id;
+  const color = agent === 'codex' ? 'var(--codex)' : 'var(--purple)';
+  const tab = newTab(id, `🤖 Main Agent · ${agent}`, color, agent);
+  activateTab(tab.id);
+}
+
 function paintSidebar() {
   $serverList.innerHTML = '';
+  // Main Agent entry — pinned above everything: the one terminal that can see
+  // and drive all of the servers below it.
+  const main = el('div', 'server mainagent' + (activeTab && Object.values(mainTabs).includes(activeTab) ? ' active' : ''));
+  main.append(el('span', 'dot'), (() => {
+    const m = el('div', 'meta');
+    m.append(el('div', 'nm', '🤖 Main Agent'));
+    m.append(el('div', 'sub', 'local claude · commands every server'));
+    return m;
+  })());
+  (main.querySelector('.dot') as HTMLElement).style.background = 'var(--purple)';
+  main.onclick = () => openMainAgent();
+  $serverList.append(main);
+
   const recent = el('div', 'server recent' + (selected === null ? ' active' : ''));
   recent.append(el('span', 'dot'), (() => { const m = el('div', 'meta'); m.append(el('div', 'nm', '★ Recent sessions')); return m; })());
   (recent.querySelector('.dot') as HTMLElement).style.background = 'var(--claude)';
@@ -868,19 +917,16 @@ document.getElementById('setup-agent')!.onclick = async () => {
     <div class="hint" id="agent-msg" style="white-space:pre-line">Registering hopmux as Claude Code tools…</div>
     <div class="modal-actions"><div class="btn primary" id="agent-ok">Close</div></div>`);
   document.getElementById('agent-ok')!.onclick = closeModal;
-  const err = await SetupMCP();
+  const res = await SetupMCP();
   const msg = document.getElementById('agent-msg');
   if (!msg) return; // modal was closed meanwhile
-  msg.textContent = err
-    ? 'Setup failed: ' + err
-    : 'Done — hopmux is now a tool set for Claude Code (user scope, every project).\n\n' +
-      'Open a terminal anywhere, run  claude , and ask things like:\n' +
-      '  ·  which server has a free GPU right now?\n' +
-      '  ·  move project X from Poseidon to Hinton and rerun the experiment\n\n' +
-      'Claude can list every server’s sessions & GPUs, run commands, copy\n' +
-      'between servers, and start remote claude/codex sessions — all of which\n' +
-      'also show up here in hopmux.\n\n' +
-      'Already-running claude sessions need a restart to pick this up.';
+  msg.textContent = res + '\n\n' +
+    'Click 🤖 Main Agent at the top of the server list and ask things like:\n' +
+    '  ·  which server has a free GPU right now?\n' +
+    '  ·  move project X from Poseidon to Hinton and rerun the experiment\n\n' +
+    'The agent can list every server’s sessions & GPUs, run commands, copy\n' +
+    'between servers, and start remote sessions — all visible here in hopmux.\n\n' +
+    'Already-running agent sessions need a restart to pick this up.';
 };
 
 // ---- Settings ----

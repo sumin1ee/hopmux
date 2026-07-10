@@ -136,6 +136,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
 .chip.on { color: var(--fg); border-color: var(--purple); background: var(--sel); }
 .chip:hover { color: var(--fg); }
 
+/* ---- main agent (pinned above the server list) ---- */
+.server.mainagent { border-bottom: 1px solid var(--border); margin-bottom: 4px; padding-bottom: 8px; }
+.server.mainagent .nm { color: var(--purple); font-weight: 700; }
+
 /* ---- session-list filter bar ---- */
 .filterbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
   padding: 2px 12px 8px; }

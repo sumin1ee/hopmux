@@ -187,15 +187,28 @@ func (a *App) AddServer(alias, hostname, port, user string) string {
 	return ""
 }
 
-// SetupMCP registers THIS executable as an MCP server for Claude Code in user
-// scope (works in every project), so the local Claude Code becomes the "main
-// agent" that can see and drive every server hopmux knows. One click, no
-// terminal needed. Returns "" on success or a human-readable error.
+// SetupMCP registers THIS executable as an MCP server with every local agent
+// CLI it can find — Claude Code (user scope) AND Codex — so whichever agent a
+// lab member uses becomes the "main agent" that can see and drive every server
+// hopmux knows. One click, no terminal. Returns a per-agent summary.
 func (a *App) SetupMCP() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return "cannot locate the hopmux executable: " + err.Error()
 	}
+	claudeMsg := setupClaudeMCP(exe)
+	if claudeMsg == "" {
+		claudeMsg = "✓ registered"
+	}
+	codexMsg := setupCodexMCP(exe)
+	if codexMsg == "" {
+		codexMsg = "✓ registered"
+	}
+	return "Claude Code — " + claudeMsg + "\nCodex — " + codexMsg
+}
+
+// setupClaudeMCP registers with Claude Code (user scope). "" on success.
+func setupClaudeMCP(exe string) string {
 	// Preferred path: the claude CLI owns its config format. Remove-then-add is
 	// idempotent and heals a stale path from a previous install location.
 	if cli, err := lookupClaude(); err == nil {
@@ -210,8 +223,7 @@ func (a *App) SetupMCP() string {
 	cfgPath := filepath.Join(home, ".claude.json")
 	raw, err := os.ReadFile(cfgPath)
 	if err != nil {
-		return "Claude Code doesn't seem to be installed (no `claude` CLI on PATH and no ~/.claude.json). " +
-			"Install it from https://claude.com/claude-code and click this again."
+		return "not installed (skipped — install from https://claude.com/claude-code)"
 	}
 	var cfg map[string]any
 	if err := json.Unmarshal(raw, &cfg); err != nil {
@@ -231,6 +243,45 @@ func (a *App) SetupMCP() string {
 		return err.Error()
 	}
 	if err := os.WriteFile(cfgPath, b, 0o600); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// setupCodexMCP registers with Codex via its CLI, falling back to appending an
+// [mcp_servers.hopmux] table to ~/.codex/config.toml. "" on success.
+func setupCodexMCP(exe string) string {
+	cli, cliErr := lookupCodex()
+	if cliErr == nil {
+		_ = runQuiet(cli, "mcp", "remove", "hopmux")
+		if _, err := runQuietOut(cli, "mcp", "add", "hopmux", "--", exe, "mcp"); err == nil {
+			return ""
+		}
+		// older codex without `mcp` subcommand — fall through to config.toml
+	}
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".codex")
+	cfgPath := filepath.Join(dir, "config.toml")
+	raw, _ := os.ReadFile(cfgPath)
+	if cliErr != nil && len(raw) == 0 {
+		return "not installed (skipped)"
+	}
+	if strings.Contains(string(raw), "[mcp_servers.hopmux]") {
+		return "" // already registered
+	}
+	block := "\n[mcp_servers.hopmux]\ncommand = \"" + strings.ReplaceAll(exe, `\`, `\\`) + "\"\nargs = [\"mcp\"]\n"
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err.Error()
+	}
+	if len(raw) > 0 {
+		_ = os.WriteFile(cfgPath+".hopmux.bak", raw, 0o600)
+	}
+	f, err := os.OpenFile(cfgPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err.Error()
+	}
+	defer f.Close()
+	if _, err := f.WriteString(block); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -256,7 +307,57 @@ func lookupClaude() (string, error) {
 			return p, nil
 		}
 	}
+	// The VSCode extension bundles a native claude.exe — the common way Claude
+	// Code exists on Windows without anything on PATH. Pick the newest install.
+	for _, base := range []string{".vscode", ".vscode-insiders"} {
+		pat := filepath.Join(home, base, "extensions", "anthropic.claude-code-*", "resources", "native-binary", "claude*")
+		matches, _ := filepath.Glob(pat)
+		var best string
+		var bestT int64
+		for _, m := range matches {
+			if st, err := os.Stat(m); err == nil && !st.IsDir() && st.ModTime().Unix() > bestT {
+				best, bestT = m, st.ModTime().Unix()
+			}
+		}
+		if best != "" {
+			return best, nil
+		}
+	}
 	return "", exec.ErrNotFound
+}
+
+// lookupCodex finds the codex CLI: PATH, then the usual install spots.
+func lookupCodex() (string, error) {
+	if p, err := exec.LookPath("codex"); err == nil {
+		return p, nil
+	}
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, ".local", "bin", "codex.exe"),
+		filepath.Join(home, ".local", "bin", "codex"),
+	}
+	if appdata := os.Getenv("APPDATA"); appdata != "" {
+		candidates = append(candidates, filepath.Join(appdata, "npm", "codex.cmd"))
+	}
+	for _, p := range candidates {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
+// AgentCLIs reports which local agent CLIs exist on this machine, in the order
+// the UI should offer them.
+func (a *App) AgentCLIs() []string {
+	out := []string{}
+	if _, err := lookupClaude(); err == nil {
+		out = append(out, "claude")
+	}
+	if _, err := lookupCodex(); err == nil {
+		out = append(out, "codex")
+	}
+	return out
 }
 
 // runQuiet runs a CLI without a console window, ignoring output.

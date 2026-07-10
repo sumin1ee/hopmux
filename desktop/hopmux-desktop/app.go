@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,7 +115,29 @@ func (a *App) OpenSession(req OpenReq) string {
 		remote = tmuxctl.AttachSession()
 	}
 	args := discover.RunArgs(req.Host, remote)
-	return a.spawn("ssh", args)
+	return a.spawn("ssh", args, "")
+}
+
+// OpenMainAgent opens a LOCAL agent CLI ("claude" or "codex") as a terminal
+// tab — the "main agent" that sees and drives every server through hopmux's
+// MCP tools (set up by SetupMCP). Returns the tab id, or "" if not installed.
+func (a *App) OpenMainAgent(agent string) string {
+	var cli string
+	var err error
+	if agent == "codex" {
+		cli, err = lookupCodex()
+	} else {
+		cli, err = lookupClaude()
+	}
+	if err != nil {
+		return ""
+	}
+	name, args := cli, []string{}
+	if low := strings.ToLower(cli); strings.HasSuffix(low, ".cmd") || strings.HasSuffix(low, ".bat") {
+		name, args = "cmd", []string{"/C", cli} // npm shims need the interpreter
+	}
+	home, _ := os.UserHomeDir()
+	return a.spawn(name, args, home)
 }
 
 // RescanHost re-probes a single host and emits a "host:update". Used after an
@@ -138,7 +161,7 @@ func (a *App) ListDir(host, dir string) []string {
 
 // ---- terminal / PTY (one per tab) ----
 
-func (a *App) spawn(name string, args []string) string {
+func (a *App) spawn(name string, args []string, dir string) string {
 	a.mu.Lock()
 	a.seq++
 	id := "t" + itoa(a.seq)
@@ -153,6 +176,9 @@ func (a *App) spawn(name string, args []string) string {
 		return id
 	}
 	cmd := ptmx.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	// A GUI app launched via Finder/LaunchServices does NOT inherit the shell's
 	// LANG/LC_* — force a UTF-8 locale so the remote emits real UTF-8 (else CJK
 	// renders as underscores).
